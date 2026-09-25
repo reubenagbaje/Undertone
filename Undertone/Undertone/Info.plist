@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+<key>CFBundleName</key><string>Undertone</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>1.14</string>
+<key>CFBundleVersion</key><string>17</string>
+<key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+<key>NSPrefersDisplaySafeAreaCompatibilityMode</key><false/>
+<key>LSUIElement</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>Undertone reads Spotify track information and lets you control playback.</string>
+<key>NSAudioCaptureUsageDescription</key><string>Undertone listens to Spotify audio to animate the live music visualiser. Audio is never recorded or uploaded.</string>
+<key>NSScreenCaptureUsageDescription</key><string>Undertone analyzes Spotify audio to display a live waveform. Audio and screen images are never saved.</string>
+</dict></plist>

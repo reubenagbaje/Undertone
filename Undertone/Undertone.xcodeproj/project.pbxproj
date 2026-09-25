@@ -1,0 +1,32 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+000000000000000000000070 = { isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+0000000000000000000000D0 = { isa = PBXBuildFile; fileRef = 000000000000000000000070; };
+000000000000000000000020 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (0000000000000000000000D0); runOnlyForDeploymentPostprocessing = 0; };
+000000000000000000000068 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyOAuth.swift; sourceTree = "<group>"; };
+0000000000000000000000CC = { isa = PBXBuildFile; fileRef = 000000000000000000000068; };
+000000000000000000000069 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyLibrary.swift; sourceTree = "<group>"; };
+0000000000000000000000CD = { isa = PBXBuildFile; fileRef = 000000000000000000000069; };
+000000000000000000000067 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverIntent.swift; sourceTree = "<group>"; };
+0000000000000000000000CB = { isa = PBXBuildFile; fileRef = 000000000000000000000067; };
+000000000000000000000064 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndertoneApp.swift; sourceTree = "<group>"; };
+0000000000000000000000C8 = { isa = PBXBuildFile; fileRef = 000000000000000000000064; };
+000000000000000000000065 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyController.swift; sourceTree = "<group>"; };
+0000000000000000000000C9 = { isa = PBXBuildFile; fileRef = 000000000000000000000065; };
+000000000000000000000066 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapture.swift; sourceTree = "<group>"; };
+0000000000000000000000CA = { isa = PBXBuildFile; fileRef = 000000000000000000000066; };
+00000000000000000000000A = { isa = PBXFileReference; explicitFileType = wrapper.application; path = Undertone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+00000000000000000000000B = { isa = PBXGroup; children = (000000000000000000000070,000000000000000000000064,000000000000000000000065,000000000000000000000066,000000000000000000000067,000000000000000000000068,000000000000000000000069); path = Undertone; sourceTree = "<group>"; };
+00000000000000000000000C = { isa = PBXGroup; children = (00000000000000000000000A); name = Products; sourceTree = "<group>"; };
+00000000000000000000000D = { isa = PBXGroup; children = (00000000000000000000000B,00000000000000000000000C); sourceTree = "<group>"; };
+00000000000000000000000E = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (0000000000000000000000C8,0000000000000000000000C9,0000000000000000000000CA,0000000000000000000000CB,0000000000000000000000CC,0000000000000000000000CD); runOnlyForDeploymentPostprocessing = 0; };
+00000000000000000000000F = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+000000000000000000000010 = { isa = PBXNativeTarget; buildConfigurationList = 00000000000000000000001E; buildPhases = (00000000000000000000000E,00000000000000000000000F,000000000000000000000020); buildRules = (); dependencies = (); name = Undertone; productName = Undertone; productReference = 00000000000000000000000A; productType = "com.apple.product-type.application"; };
+000000000000000000000001 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; }; buildConfigurationList = 00000000000000000000001F; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en,Base); mainGroup = 00000000000000000000000D; productRefGroup = 00000000000000000000000C; projectDirPath = ""; projectRoot = ""; targets = (000000000000000000000010); };
+000000000000000000000014 = { isa = XCBuildConfiguration; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; PRODUCT_NAME = Undertone; PRODUCT_BUNDLE_IDENTIFIER = dev.reuben.Undertone; INFOPLIST_FILE = Undertone/Info.plist; CODE_SIGN_ENTITLEMENTS = Undertone/Undertone.entitlements; CODE_SIGN_STYLE = Automatic; ENABLE_HARDENED_RUNTIME = YES; ENABLE_APP_SANDBOX = NO; SWIFT_VERSION = 5.0; MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
+000000000000000000000015 = { isa = XCBuildConfiguration; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; PRODUCT_NAME = Undertone; PRODUCT_BUNDLE_IDENTIFIER = dev.reuben.Undertone; INFOPLIST_FILE = Undertone/Info.plist; CODE_SIGN_ENTITLEMENTS = Undertone/Undertone.entitlements; CODE_SIGN_STYLE = Automatic; ENABLE_HARDENED_RUNTIME = YES; ENABLE_APP_SANDBOX = NO; SWIFT_VERSION = 5.0; MACOSX_DEPLOYMENT_TARGET = 13.0; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; name = Release; };
+000000000000000000000016 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = macosx; CLANG_ENABLE_MODULES = YES; }; name = Debug; };
+000000000000000000000017 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = macosx; CLANG_ENABLE_MODULES = YES; }; name = Release; };
+00000000000000000000001E = { isa = XCConfigurationList; buildConfigurations = (000000000000000000000014,000000000000000000000015); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+00000000000000000000001F = { isa = XCConfigurationList; buildConfigurations = (000000000000000000000016,000000000000000000000017); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+}; rootObject = 000000000000000000000001; }

@@ -6,3 +6,6 @@ swiftc -module-cache-path build/ModuleCache Undertone/AudioCapture.swift Underto
 build/tests/EnvelopeTests
 swiftc -parse-as-library -module-cache-path build/ModuleCache Undertone/SpotifyOAuth.swift Undertone/SpotifyLibrary.swift Tests/SpotifyTests.swift -o build/tests/SpotifyTests
 build/tests/SpotifyTests
+
+swiftc -parse-as-library -module-cache-path build/ModuleCache Undertone/MediaModuleModels.swift Tests/MediaModuleTests.swift -o build/tests/MediaModuleTests
+build/tests/MediaModuleTests

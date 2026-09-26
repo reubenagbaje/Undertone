@@ -22,13 +22,22 @@ Built with **Swift, SwiftUI and AppKit** for macOS.
 - **Custom appearance** — optional black-to-Liquid-Glass background, soft shadows, a thin outline without a top border, and adjustable compact top corners.
 - **Quiet when idle** — hides behind the notch when playback stops; hover just beneath the camera to bring it back.
 
+## New in v1.24
+
+- Fuller volume and brightness indicators extend directly from the notch when system levels change, with rounded corners and more room around icons and percentages.
+- **Always show notch** in Appearance keeps an idle island visible on notchless Macs too.
+- A queue button beside the heart expands the notch into a scrollable Spotify Up Next list.
+- General settings include a sleep timer, launch at login, keyboard shortcuts, and signed Sparkle updates.
+- Optional artwork colour accents complement the existing Liquid Glass appearance.
+
+Enable **Settings → General → Updates → Automatically check for updates**. Automatic download/installation is a separate option. Older versions without Sparkle need a manual installation first. Queue access may require reconnecting your Spotify account once to grant playback-reading scopes. The macOS system level indicator is not suppressed.
+
+
 ## Now Playing and Settings dashboard
 
-Version 1.20 adds a native tabbed Settings window, automatic Spotify reconnection, and an iOS-inspired Now Playing card with artwork ambience, transport/seek/Spotify-volume controls, imported timed lyrics and a spring transition back to the notch.
+Native General / Modules / Appearance settings include automatic Spotify reconnection and an iOS-inspired lock-screen player. Tap artwork to fill the screen, then tap again to collapse. Move the pointer into the lower password area to reveal the native prompt. Optional Liquid Glass, artwork ambience and imported timed lyrics are available in Settings → Modules.
 
-Try **Settings → Modules → Preview Now Playing**. Tap the artwork to expand it across the display, then tap again to collapse into a compact glass panel. The **Lock Screen Media Player** toggle enables the experimental lock overlay, now using a private SkyLight system Space and mouse-only media controls. While locked, the smaller, dark player is centred above the lower authentication area. Actual lock-screen visibility still requires testing on the target Mac; it is not guaranteed by a window level or desktop preview. Lyrics require an imported `.lrc` file; they are not fetched from Spotify.
-
-See [implementation, integration snippets and platform limits](LOCK-PLAYER-INTEGRATION.md).
+Lock-screen visibility was confirmed on the development Mac. It uses private SkyLight APIs and may vary with macOS versions. Lyrics use imported `.lrc` files, not Spotify's lyrics service. See [integration and platform details](LOCK-PLAYER-INTEGRATION.md).
 
 ## Requirements
 
@@ -41,7 +50,7 @@ A notched MacBook gives the intended appearance. On displays without a notch, Un
 
 ## Installation
 
-1. Download `Undertone-Notch-v1.21-Mac.zip` from this repository’s **Releases**, once published.
+1. Download [Undertone v1.24](https://github.com/reubenagbaje/Undertone/releases/tag/v1.24).
 2. Unzip it and move **Undertone.app** to Applications.
 3. Open Undertone, then open Spotify and play a song.
 4. Undertone connects to Spotify automatically. Approve Automation access if requested; use **Settings → General → Retry connection** after resolving a permission denial.
@@ -81,7 +90,7 @@ Desktop playback controls work separately from the optional Spotify account conn
 4. In Undertone Settings, find **Spotify Liked Songs** and paste your **Client ID**. No client secret is needed.
 5. Click **Connect Liked Songs**, sign in with the account you use in the Spotify desktop app, and approve access.
 
-Authentication uses Authorization Code with PKCE. Tokens are stored in **macOS Keychain**. The requested scopes are `user-library-read` and `user-library-modify`.
+Authentication uses Authorization Code with PKCE. Tokens are stored in **macOS Keychain**. The requested scopes are `user-library-read`, `user-library-modify`, `user-read-playback-state` and `user-read-currently-playing`.
 
 See [Spotify setup and troubleshooting](SPOTIFY-SETUP.md) for more detail.
 
@@ -101,7 +110,7 @@ Permission labels vary by macOS version. Review them under **System Settings →
 - Artwork and account/library requests communicate with Spotify. There is no analytics service.
 - Spotify credentials are not included in the source project.
 
-The direct-distribution build uses hardened runtime with the Apple Events entitlement. App Sandbox is disabled. The usage descriptions and entitlement are included in the project.
+The local ad-hoc build uses the Apple Events entitlement without hardened runtime; Developer ID builds should enable hardened runtime and sign all embedded frameworks with the same identity. App Sandbox is disabled. The usage descriptions and entitlement are included in the project.
 
 ## Build from source
 
@@ -112,7 +121,7 @@ For a universal Release build, run from the directory containing the Xcode proje
 ```sh
 xcodebuild -project Undertone.xcodeproj -scheme Undertone \
   -configuration Release -derivedDataPath build \
-  CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO ENABLE_HARDENED_RUNTIME=NO \
   'ARCHS=arm64 x86_64' ONLY_ACTIVE_ARCH=NO build
 
 open build/Build/Products/Release/Undertone.app

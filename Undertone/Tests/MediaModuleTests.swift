@@ -1,0 +1,67 @@
+import Foundation
+import CoreGraphics
+
+@main struct MediaModuleTests {
+    static func main() {
+        var seek = PlaybackSeekState()
+        assert(seek.accepts(revision: 0, pendingAtStart: false))
+        let first = seek.begin()
+        assert(!seek.accepts(revision: 0, pendingAtStart: false))
+        let second = seek.begin()
+        assert(!seek.complete(first))
+        assert(seek.pending)
+        assert(seek.complete(second))
+        assert(!seek.accepts(revision: first, pendingAtStart: false))
+        assert(!seek.accepts(revision: second, pendingAtStart: true))
+        assert(seek.accepts(revision: second, pendingAtStart: false))
+        print("PASS: stale seek samples, rapid seek completion order and fresh reconciliation")
+        var retry = SpotifyReconnectPolicy()
+        assert(retry.allowsAttempt(at: 0))
+        retry.failed(code: -600, now: 10)
+        assert(!retry.allowsAttempt(at: 11) && retry.allowsAttempt(at: 12))
+        for _ in 0..<20 { retry.failed(code: -1712, now: 20) }
+        assert(retry.retryAt == 50)
+        retry.failed(code: -1743, now: 60)
+        assert(!retry.allowsAttempt(at: 10000))
+        retry.reset()
+        assert(retry.allowsAttempt(at: 0))
+        let lines = LRCParser.parse("[ar:Example]\n[offset:-500]\n[00:01.25][00:05.000]First\n[00:03]Second\n[99:99]Invalid\n[00:06]\n[bad]Ignored")
+        assert(lines.count == 4)
+        assert(lines.map(\.time) == [0.75, 2.5, 4.5, 5.5])
+        assert(lines.map(\.text) == ["First", "Second", "First", ""])
+        assert(LRCParser.activeIndex(in: lines, position: 0) == nil)
+        assert(LRCParser.activeIndex(in: lines, position: 2.5) == 1)
+        assert(LRCParser.activeIndex(in: lines, position: 1) == 0)
+        assert(LRCParser.activeIndex(in: [], position: 5) == nil)
+        assert(LRCParser.activeIndex(in: lines, position: .nan) == nil)
+        assert(LRCParser.parse("[00:01.1]Tenths")[0].time == 1.1)
+        var policy = LockPresentationPolicy()
+        policy.enabled = true; policy.playing = true
+        assert(!policy.shouldPresent)
+        policy.locked = true; assert(policy.shouldPresent)
+        policy.asleep = true; assert(!policy.shouldPresent)
+        policy.asleep = false; policy.sessionActive = false; assert(!policy.shouldPresent)
+        policy.sessionActive = true; policy.enabled = false; assert(!policy.shouldPresent)
+        policy.locked = false; policy.preview = true; assert(policy.shouldPresent)
+        policy.locked = true; assert(!policy.shouldPresent)
+        for width: CGFloat in [640, 1024, 1470, 2560] {
+            let layout = LockPlayerLayout(size: CGSize(width: width, height: 900), locked: true)
+            assert(!layout.controls.intersects(layout.loginArea))
+            assert(layout.controls.maxX <= width && layout.controls.minX >= 0)
+            assert(layout.controls.maxY <= 900)
+            assert(abs(layout.controls.midX - width / 2) < 0.01)
+            assert(layout.controls.width <= 370)
+            for y: CGFloat in [layout.loginArea.minY + 1, 800, 899] {
+                assert(!layout.permitsInteraction(at: CGPoint(x: width / 2, y: y), expanded: false))
+                assert(!layout.permitsInteraction(at: CGPoint(x: width / 2, y: y), expanded: true))
+            }
+            assert(layout.permitsInteraction(at: CGPoint(x: layout.controls.midX, y: layout.controls.midY), expanded: false))
+            assert(!layout.permitsInteraction(at: CGPoint(x: -1, y: 20), expanded: true))
+        }
+        let previewLayout = LockPlayerLayout(size: CGSize(width: 1000, height: 850), locked: false)
+        assert(previewLayout.permitsInteraction(at: CGPoint(x: 500, y: 100), expanded: true))
+        assert(!previewLayout.permitsInteraction(at: CGPoint(x: 500, y: 100), expanded: false))
+        print("PASS: authentication-area exclusion, control bounds and expansion hit regions")
+        print("PASS: bounded reconnect backoff, denied-permission recovery, LRC parsing/seeking and lock/sleep/session policy")
+    }
+}

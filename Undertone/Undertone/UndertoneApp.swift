@@ -14,12 +14,11 @@ enum IslandMotion {
 @main struct UndertoneApp: App {
     @NSApplicationDelegateAdaptor(IslandDelegate.self) private var delegate
     var body: some Scene {
-        Settings { EmptyView() }
+        Settings { SettingsDashboard(state: delegate.state, spotify: delegate.spotify, audio: delegate.audio, lockPlayer: delegate.lockPlayer) }
             .commands {
                 CommandMenu("Player") {
                     Button("Show Player") { delegate.showPlayer() }.keyboardShortcut("o")
                     Button("Collapse Player") { delegate.collapsePlayer() }
-                    Button("Player Settings…") { delegate.showSettings() }.keyboardShortcut(",")
                 }
             }
     }
@@ -85,9 +84,13 @@ final class IslandPanel: NSPanel {
 }
 
 @MainActor final class IslandDelegate: NSObject, NSApplicationDelegate {
-    private let spotify = SpotifyController()
-    private let audio = AudioCapture()
-    private let state = IslandState()
+    let spotify = SpotifyController()
+    let audio = AudioCapture()
+    let state = IslandState()
+    lazy var lockPlayer = LockScreenPlayerController(spotify: spotify, audio: audio, notchRect: { [weak self] in
+        guard let self else { return .zero }
+        return CGRect(x: self.anchor.x - self.state.compactWidth / 2, y: self.anchor.y - self.state.compactHeight, width: self.state.compactWidth, height: self.state.compactHeight)
+    })
     private var panel: IslandPanel?
     private var timer: Timer?
     private var screenObserver: NSObjectProtocol?
@@ -129,6 +132,13 @@ final class IslandPanel: NSPanel {
             Task { @MainActor in self?.updatePointer() }
         }
         RunLoop.main.add(timer!, forMode: .common)
+        spotify.startAutomaticConnection()
+        lockPlayer.onSleepChanged = { [weak self] asleep in
+            guard let self else { return }
+            self.timer?.fireDate = asleep ? .distantFuture : Date()
+            self.audio.setDisplaySleeping(asleep)
+        }
+        lockPlayer.start()
         Task { await audio.resumeIfEnabled() }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
             guard let self else { return event }
@@ -138,7 +148,7 @@ final class IslandPanel: NSPanel {
 
     func showPlayer() { state.pinned = true; state.open() }
     func collapsePlayer() { state.close() }
-    func showSettings() { state.open(); state.settingsOpen = true }
+    func showSettings() { state.settingsOpen = true }
 
     private func position() {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.screens.first,
@@ -271,6 +281,8 @@ final class IslandPanel: NSPanel {
     func applicationWillTerminate(_ notification: Notification) {
         swipeSettleTask?.cancel()
         timer?.invalidate()
+        lockPlayer.shutdown()
+        spotify.shutdown()
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
     }
@@ -336,9 +348,7 @@ struct IslandView: View {
                             .onHover { settingsHovered = $0 }
                             .help("Setup and settings").accessibilityLabel("Setup and settings")
                             .padding(.trailing, 22).padding(.top, 2)
-                            .popover(isPresented: $state.settingsOpen, arrowEdge: .bottom) {
-                                IslandSettings(state: state, spotify: spotify, audio: audio)
-                            }
+
                         }
                         .contextMenu { Button("Settings…") { state.settingsOpen = true } }
                         .transition(.opacity)
@@ -429,6 +439,7 @@ struct IslandView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay { SettingsRequestHandler(state: state) }
         .preferredColorScheme(.dark).ignoresSafeArea()
     }
 }
@@ -649,6 +660,9 @@ struct PlayerView: View {
     @ObservedObject var spotify: SpotifyController
     @ObservedObject var audio: AudioCapture
     let openLibrarySettings: () -> Void
+    var artworkAction: (() -> Void)? = nil
+    var locked = false
+    var hideArtwork = false
     @State private var seeking = false
     @State private var seekPosition: Double = 0
     @State private var progressHovered = false
@@ -657,10 +671,13 @@ struct PlayerView: View {
         GeometryReader { geometry in
             let scale = (geometry.size.width - 38) / 360
             ZStack(alignment: .topLeading) {
+                if !hideArtwork {
                 AnimatedCover(spotify: spotify)
                     .frame(width: 64, height: 64)
                     .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .offset(x: 20, y: 14)
+                    .onTapGesture { artworkAction?() }
+                }
                 VStack(alignment: .leading, spacing: 1) {
                     if spotify.connected {
                         TrackHeading(title: spotify.title, artist: spotify.artist, library: spotify.library)
@@ -669,27 +686,28 @@ struct PlayerView: View {
                             .font(.system(size: 14, weight: .bold)).buttonStyle(.plain)
                         Text("Choose a song to begin").font(.system(size: 11)).foregroundStyle(.gray)
                     }
-                }.frame(width: 197, height: 34, alignment: .bottomLeading).offset(x: 96, y: 38)
+                }.frame(width: hideArtwork ? 269 : 197, height: 34, alignment: .bottomLeading).offset(x: hideArtwork ? 24 : 96, y: 38)
                 Button {
                     if !audio.running { Task { await audio.start() } }
                 } label: {
                     Waveform(levels: audio.levels, tint: audio.running ? Color(nsColor: spotify.waveformTint) : .orange)
                         .frame(width: 18, height: 18).frame(width: 30, height: 30)
                 }
-                .buttonStyle(SpringControlStyle()).disabled(audio.busy)
+                .buttonStyle(SpringControlStyle()).disabled(audio.busy || locked)
                 .help(audio.running ? "Live Spotify audio" : "Enable reactive waveform")
                 .accessibilityLabel(audio.running ? "Live Spotify audio waveform" : "Enable reactive waveform")
                 .offset(x: 303, y: 34)
                 progress.frame(width: 312, height: 20).offset(x: 24, y: 93)
                 SpotifyHeart(library: spotify.library, playbackConnected: spotify.connected, openSettings: openLibrarySettings)
                     .position(x: 77, y: 148)
-                control("backward.fill", label: "Previous track", size: 19) { spotify.command(.previous) }
+                    .disabled(locked && (!spotify.library.connected || spotify.library.error != nil))
+                control("backward.fill", label: "Previous track", size: 22) { spotify.command(.previous) }
                     .position(x: 126, y: 148)
-                control(spotify.playing ? "pause.fill" : "play.fill", label: spotify.playing ? "Pause" : "Play", size: 23) { spotify.command(.toggle) }
+                control(spotify.playing ? "pause.fill" : "play.fill", label: spotify.playing ? "Pause" : "Play", size: 27) { spotify.command(.toggle) }
                     .position(x: 180, y: 148)
-                control("forward.fill", label: "Next track", size: 19) { spotify.command(.next) }
+                control("forward.fill", label: "Next track", size: 22) { spotify.command(.next) }
                     .position(x: 234, y: 148)
-                control("shuffle", label: "Toggle shuffle", size: 18, muted: !spotify.shuffling) { spotify.toggleShuffle() }
+                control("shuffle", label: "Toggle shuffle", size: 20, muted: !spotify.shuffling) { spotify.toggleShuffle() }
                     .position(x: 283, y: 148)
             }
             .frame(width: 360, height: 189, alignment: .topLeading)
@@ -708,7 +726,7 @@ struct PlayerView: View {
                     Rectangle().fill(Color(white: seeking || progressHovered ? 0.94 : 0.65))
                         .frame(width: geometry.size.width * min(1, max(0, value / duration)))
                 }
-                .clipShape(Capsule()).frame(height: 7).frame(maxHeight: .infinity)
+                .clipShape(Capsule()).frame(height: 8).frame(maxHeight: .infinity)
                 .onHover { progressHovered = $0 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0).onChanged { event in
@@ -717,8 +735,8 @@ struct PlayerView: View {
                     seekPosition = min(1, max(0, event.location.x / geometry.size.width)) * duration
                 }.onEnded { _ in
                     guard seeking else { return }
-                    seeking = false
                     spotify.seek(seekPosition)
+                    seeking = false
                 })
                 .accessibilityElement().accessibilityLabel("Track position")
                 .accessibilityValue(time(value))
@@ -728,10 +746,11 @@ struct PlayerView: View {
             }
             Text("-" + time(max(0, spotify.duration - (seeking ? seekPosition : spotify.position))))
                 .frame(width: 39, alignment: .trailing)
-        }.font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(Color(white: 0.48))
+        }.transaction { $0.animation = nil }
+        .font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(Color(white: 0.48))
     }
     private func control(_ symbol: String, label: String, size: CGFloat, muted: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).font(.system(size: size, weight: symbol == "shuffle" ? .regular : .semibold)).frame(width: 30, height: 36) }
+        Button(action: action) { Image(systemName: symbol).font(.system(size: size, weight: symbol == "shuffle" ? .medium : .bold)).frame(width: 30, height: 36) }
             .buttonStyle(SpringControlStyle()).foregroundStyle(muted ? Color(white: 0.24) : .white)
             .disabled(!spotify.connected).accessibilityLabel(label).help(label)
     }
@@ -802,73 +821,6 @@ struct SpotifyLibrarySettings: View {
             }
             if let error = library.error { Text(error).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }
-    }
-}
-
-struct IslandSettings: View {
-    @ObservedObject var state: IslandState
-    @ObservedObject var spotify: SpotifyController
-    @ObservedObject var audio: AudioCapture
-    var body: some View {
-        ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Undertone").font(.headline)
-            Toggle("Hover haptics", isOn: $state.haptics)
-            Toggle("Keep player expanded", isOn: $state.pinned)
-            Toggle("Thin white outline", isOn: $state.whiteOutline)
-            Toggle("Black to Liquid Glass", isOn: $state.glassAppearance)
-            Text("Expanded player fades from black around the camera to glass below.")
-                .font(.caption).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Idle top-corner curve")
-                Slider(value: $state.idleCornerCurve, in: 0...16, step: 1)
-                    .accessibilityLabel("Idle top-corner curve")
-                    .accessibilityValue("\(Int(state.idleCornerCurve)) of 16")
-                HStack {
-                    Text("Straight")
-                    Spacer()
-                    Text("More curved")
-                }.font(.caption).foregroundStyle(.secondary)
-                Text("Adjusts how the compact notch curves into the menu bar.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Reset curve") { state.idleCornerCurve = 6 }
-                    .font(.caption)
-            }
-            Toggle("Reverse swipe direction", isOn: $state.reverseSwipes)
-            Text("Hover to gently enlarge, then keep hovering to open. When paused, hover just beneath the camera to reveal the player. Move away after swiping to enable hover again.")
-            Text(state.reverseSwipes ? "Swipe right for next; left to restart or go back." : "Swipe left for next; right to restart or go back.")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Open Spotify") { spotify.openSpotify() }
-                Button("Reconnect") { spotify.connect() }
-            }
-            Button(audio.busy ? "Please wait…" : audio.running ? "Stop Spotify audio" : "Enable Spotify audio") {
-                Task { if audio.running { await audio.stop() } else { await audio.start() } }
-            }.disabled(audio.busy)
-            Text(audio.message).font(.caption).foregroundStyle(.secondary)
-            if audio.running {
-                Text("Audio frames received: \(audio.receivedFrames) • Peak: \(Int(audio.peakLevel * 100))%").font(.caption2).monospacedDigit()
-                Button("Restart audio") { Task { await audio.restart() } }.disabled(audio.busy)
-            }
-            if let error = spotify.error { Text(error).font(.caption).foregroundStyle(.orange) }
-            Divider()
-            SpotifyLibrarySettings(library: spotify.library)
-            HStack {
-                Button("Privacy settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security")!) }
-                Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
-            }
-        }.padding(20).frame(width: 340).toggleStyle(.checkbox)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Text("Made by Reuben Agbaje")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(.regularMaterial)
-        }
-        .frame(width: 340, height: 540).preferredColorScheme(.dark)
     }
 }
 

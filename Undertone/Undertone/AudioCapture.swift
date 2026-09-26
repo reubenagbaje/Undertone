@@ -262,6 +262,27 @@ final class SystemAudioTap {
     private var generation = UUID()
     private var processMonitor: Timer?
     private var capturedProcesses: [AudioObjectID] = []
+    private var displaySleeping = false
+    private var suspensionTask: Task<Void, Never>?
+
+    func setDisplaySleeping(_ value: Bool) {
+        displaySleeping = value
+        suspensionTask?.cancel()
+        suspensionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while self.busy {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                guard !Task.isCancelled else { return }
+            }
+            guard !Task.isCancelled else { return }
+            if self.displaySleeping {
+                let enabled = UserDefaults.standard.bool(forKey: "captureEnabled")
+                await self.stop()
+                UserDefaults.standard.set(enabled, forKey: "captureEnabled")
+            } else { await self.resumeIfEnabled() }
+        }
+    }
+
 
     func resumeIfEnabled() async {
         if UserDefaults.standard.bool(forKey: "captureEnabled") { await start() }
@@ -273,7 +294,7 @@ final class SystemAudioTap {
     }
 
     func start() async {
-        guard !busy, !running else { return }
+        guard !busy, !running, !displaySleeping else { return }
         busy = true
         UserDefaults.standard.set(true, forKey: "captureEnabled")
         monitorSpotifyProcesses()
@@ -303,6 +324,7 @@ final class SystemAudioTap {
                 return
             }
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard !displaySleeping else { return }
             guard let display = content.displays.first else { throw CaptureError.noDisplay }
             let applications = content.applications.filter { SpotifyAudioSource.matches($0.bundleIdentifier) }
             guard !applications.isEmpty else { throw CaptureError.noSpotify }
@@ -357,7 +379,7 @@ final class SystemAudioTap {
         guard processMonitor == nil else { return }
         processMonitor = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.busy, UserDefaults.standard.bool(forKey: "captureEnabled") else { return }
+                guard let self, !self.busy, !self.displaySleeping, UserDefaults.standard.bool(forKey: "captureEnabled") else { return }
                 if #available(macOS 14.2, *), let ids = try? SpotifyAudioSource.processIDs(), ids != self.capturedProcesses {
                     await self.restart()
                 }
@@ -367,7 +389,7 @@ final class SystemAudioTap {
     }
 
     private func receive(_ values: [Float], frames: Int, token: UUID) {
-        guard generation == token else { return }
+        guard generation == token, !displaySleeping else { return }
         lastSample = Date()
         levels = values
         peakLevel = max(peakLevel, values.max() ?? 0)

@@ -6,8 +6,9 @@ import Combine
     @Published var artist = "Connect Spotify to get started"
     @Published var album = ""
     @Published var artwork: NSImage? {
-        didSet { waveformTint = Self.artworkTint(artwork) }
+        didSet { waveformTint = Self.artworkTint(artwork); ambientColors = Self.artworkPalette(artwork) }
     }
+    @Published private(set) var ambientColors: [NSColor] = [.darkGray, .black]
     @Published private(set) var waveformTint = NSColor(white: 0.7, alpha: 1)
     @Published private(set) var trackRevision = 0
     @Published private(set) var artworkRevision = UUID()
@@ -19,7 +20,13 @@ import Combine
     @Published var playing = false
     @Published var shuffling = false
     let library = SpotifyLibrary()
-    private var trackID = ""
+    private(set) var trackID = ""
+    @Published var volume: Double = 50
+    private var retry = SpotifyReconnectPolicy()
+    private var lastScriptErrorCode: Int?
+    private var suspended = false
+    private var connectionGeneration = UUID()
+    private var workspaceObservers: [NSObjectProtocol] = []
     @Published var position: Double = 0
     @Published var duration: Double = 0
     @Published var connected = false
@@ -28,16 +35,54 @@ import Combine
     private let queue = DispatchQueue(label: "Undertone.spotify")
     private var timer: Timer?
     private var polling = false
+    private var seekState = PlaybackSeekState()
     private var artworkURL = ""
     private var artworkTask: Task<Void, Never>?
 
     func connect() {
         enabled = true
+        retry.reset()
         refresh()
         if timer == nil {
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.refresh() }
             }
+        }
+    }
+
+    func startAutomaticConnection() {
+        guard workspaceObservers.isEmpty else { return }
+        connect()
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      app.bundleIdentifier == "com.spotify.client" else { return }
+                Task { @MainActor in
+                    guard let self, !self.retry.permissionDenied else { return }
+                    self.retry.reset(); self.enabled = true; self.refresh()
+                }
+            })
+        }
+    }
+    func setSuspended(_ value: Bool) {
+        suspended = value
+        connectionGeneration = UUID()
+        timer?.fireDate = value ? .distantFuture : Date()
+        if value { artworkTask?.cancel(); artworkURL = "" }
+        if !value { refresh() }
+    }
+    func shutdown() {
+        timer?.invalidate(); timer = nil
+        workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        workspaceObservers.removeAll()
+        artworkTask?.cancel(); feedbackTask?.cancel()
+    }
+    func setVolume(_ value: Double) {
+        guard connected, value.isFinite else { return }
+        volume = min(100, max(0, value))
+        run("set sound volume to \(Int(volume))") { [weak self] _, message in
+            self?.error = message; self?.refresh()
         }
     }
 
@@ -56,13 +101,14 @@ import Combine
                 let script = NSAppleScript(source: "with timeout of 3 seconds\ntell application id \"com.spotify.client\"\n\(body)\nend tell\nend timeout")
                 let result = script?.executeAndReturnError(&error)
                 let message = error?[NSAppleScript.errorMessage] as? String
-                DispatchQueue.main.async { completion(result, message) }
+                let code = error?[NSAppleScript.errorNumber] as? Int
+                DispatchQueue.main.async { self.lastScriptErrorCode = code; completion(result, message) }
             }
         }
     }
 
     func refresh() {
-        guard enabled, !polling else { return }
+        guard enabled, !polling, !suspended, retry.allowsAttempt(at: ProcessInfo.processInfo.systemUptime) else { return }
         guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").isEmpty else {
             connected = false; playing = false; position = 0; duration = 0
             title = "Spotify is closed"; artist = "Open Spotify to choose some music"; album = ""
@@ -72,27 +118,38 @@ import Combine
             return
         }
         polling = true
+        let generation = connectionGeneration
+        let seekRevision = seekState.revision
+        let seekWasPending = seekState.pending
         run("""
         set t to current track
-        return {name of t, artist of t, album of t, artwork url of t, duration of t, player position, player state as text, shuffling, id of t}
+        return {name of t, artist of t, album of t, artwork url of t, duration of t, player position, player state as text, shuffling, id of t, sound volume}
         """) { [weak self] result, message in
             guard let self else { return }
             self.polling = false
+            guard self.connectionGeneration == generation, !self.suspended else { return }
             if let message {
                 self.error = "Spotify: \(message) If access was denied, enable Undertone under Privacy & Security → Automation, then reconnect."
                 self.connected = false; self.playing = false
-                // Do not repeatedly request denied automation permission.
-                self.enabled = false
+                self.retry.failed(code: self.lastScriptErrorCode, now: ProcessInfo.processInfo.systemUptime)
+                // Only a denied Automation request needs explicit user recovery.
+                if self.retry.permissionDenied { self.enabled = false }
                 return
             }
-            guard let result, result.numberOfItems == 9 else { return }
+            guard let result, result.numberOfItems == 10 else {
+                self.retry.failed(code: nil, now: ProcessInfo.processInfo.systemUptime); return
+            }
+            self.retry.reset()
+            self.volume = min(100, max(0, result.atIndex(10)?.doubleValue ?? 50))
             self.connected = true; self.error = nil
             self.title = result.atIndex(1)?.stringValue ?? "Unknown track"
             self.artist = result.atIndex(2)?.stringValue ?? "Unknown artist"
             self.album = result.atIndex(3)?.stringValue ?? ""
             // Spotify's desktop Apple Event returns milliseconds despite its sdef description.
             self.duration = max(0, (result.atIndex(5)?.doubleValue ?? 0) / 1000)
-            self.position = min(self.duration, max(0, result.atIndex(6)?.doubleValue ?? 0))
+            if self.seekState.accepts(revision: seekRevision, pendingAtStart: seekWasPending) {
+                self.position = min(self.duration, max(0, result.atIndex(6)?.doubleValue ?? 0))
+            }
             self.playing = result.atIndex(7)?.stringValue == "playing"
             self.shuffling = result.atIndex(8)?.booleanValue ?? false
             let nextTrackID = result.atIndex(9)?.stringValue ?? ""
@@ -136,9 +193,12 @@ import Combine
     func seek(_ seconds: Double) {
         guard connected, seconds.isFinite else { return }
         let value = min(duration, max(0, seconds))
+        let token = seekState.begin()
+        position = value // Keep both players at the drag target immediately.
         run("set player position to \(value)") { [weak self] _, message in
-            self?.error = message
-            self?.refresh()
+            guard let self, self.seekState.complete(token) else { return }
+            self.error = message
+            self.refresh() // Also restores Spotify's position if seeking failed.
         }
     }
     func toggleShuffle() {
@@ -148,6 +208,24 @@ import Combine
             self?.refresh()
         }
     }
+    private static func artworkPalette(_ image: NSImage?) -> [NSColor] {
+        guard let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [.darkGray, .black] }
+        let bitmap = NSBitmapImageRep(cgImage: cg)
+        var bins: [Int: (Double, Double, Double, Double)] = [:]
+        for y in 0..<12 { for x in 0..<12 {
+            guard let c = bitmap.colorAt(x: min(bitmap.pixelsWide - 1, x * bitmap.pixelsWide / 12), y: min(bitmap.pixelsHigh - 1, y * bitmap.pixelsHigh / 12))?.usingColorSpace(.deviceRGB), c.alphaComponent > 0.5 else { continue }
+            let r = Double(c.redComponent), g = Double(c.greenComponent), b = Double(c.blueComponent)
+            let key = Int(r * 5) * 36 + Int(g * 5) * 6 + Int(b * 5)
+            let weight = 0.3 + Double(c.saturationComponent)
+            let old = bins[key] ?? (0, 0, 0, 0)
+            bins[key] = (old.0 + r * weight, old.1 + g * weight, old.2 + b * weight, old.3 + weight)
+        } }
+        let colors = bins.values.sorted { $0.3 > $1.3 }.prefix(3).map {
+            NSColor(calibratedRed: $0.0 / $0.3, green: $0.1 / $0.3, blue: $0.2 / $0.3, alpha: 1)
+        }
+        return colors.isEmpty ? [.darkGray, .black] : colors
+    }
+
     private static func artworkTint(_ image: NSImage?) -> NSColor {
         let fallback = NSColor(white: 0.7, alpha: 1)
         guard let image, let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return fallback }

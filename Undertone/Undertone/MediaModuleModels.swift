@@ -94,3 +94,16 @@ struct PlaybackSeekState {
         sample == revision && !pending && !pendingAtStart
     }
 }
+
+struct SleepSchedule {
+    private(set) var deadline: Date?
+    mutating func start(minutes: Int, now: Date = Date()) {
+        deadline = minutes > 0 ? now.addingTimeInterval(Double(minutes) * 60) : nil
+    }
+    mutating func cancel() { deadline = nil }
+    mutating func consumeExpiration(now: Date = Date()) -> Bool {
+        guard let deadline, now >= deadline else { return false }
+        self.deadline = nil
+        return true
+    }
+}

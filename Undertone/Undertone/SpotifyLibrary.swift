@@ -1,7 +1,32 @@
 import Foundation
 import Combine
 
+struct QueueTrack: Decodable {
+    let uri: String
+    let name: String
+    let artists: [Artist]?
+    struct Artist: Decodable { let name: String }
+    var subtitle: String { artists?.map(\.name).joined(separator: ", ") ?? "Spotify episode" }
+}
+
 @MainActor final class SpotifyLibrary: ObservableObject {
+    @Published private(set) var queue: [QueueTrack] = []
+    @Published private(set) var queueLoading = false
+    @Published private(set) var queueError: String?
+    func loadQueue() async {
+        guard connected, !queueLoading else { return }
+        queueLoading = true
+        let epoch = generation
+        defer { if generation == epoch { queueLoading = false } }
+        do {
+            let data = try await request(path: "/me/player/queue", method: "GET", uri: nil)
+            struct Response: Decodable { let queue: [QueueTrack] }
+            let response = try JSONDecoder().decode(Response.self, from: data)
+            guard generation == epoch else { return }
+            queue = response.queue; queueError = nil
+        } catch is CancellationError { }
+        catch { if generation == epoch { queueError = error.localizedDescription } }
+    }
     @Published var clientID: String
     @Published private(set) var connected = false
     @Published private(set) var signingIn = false
@@ -83,6 +108,7 @@ import Combine
 
     func cancelSignIn() { loginTask?.cancel(); listener?.cancel() }
     func disconnect() {
+        queue = []; queueLoading = false; queueError = nil
         metadataTask?.cancel(); metadataTask = nil; metadataURI = nil; explicitTrack = nil; metadataError = nil
         generation = UUID()
         loginTask?.cancel(); listener?.cancel(); listener = nil
@@ -212,7 +238,7 @@ import Combine
                 error = "Spotify authorization expired. Connect your account again."
                 throw SpotifyAuthError(message: error!)
             case 403:
-                throw SpotifyAuthError(message: "Spotify refused library access. Check the app's user allowlist, the developer account's Premium status, and reconnect to grant library permissions.")
+                throw SpotifyAuthError(message: "Spotify refused access. Reconnect in Settings to grant updated permissions, and check your Spotify developer app access and Premium requirements.")
             case 429:
                 let delay = max(1, Double(http.value(forHTTPHeaderField: "Retry-After") ?? "30") ?? 30)
                 blockedUntil = Date().addingTimeInterval(delay)

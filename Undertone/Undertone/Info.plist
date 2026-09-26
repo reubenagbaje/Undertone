@@ -11,9 +11,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.21</string>
+	<string>1.24</string>
 	<key>CFBundleVersion</key>
-	<string>24</string>
+	<string>28</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSUIElement</key>
@@ -26,5 +26,15 @@
 	<false/>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Undertone analyzes Spotify audio to display a live waveform. Audio and screen images are never saved.</string>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/reubenagbaje/Undertone/main/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>cXkw6mDzaFnhHedw3xrq4zpVJjDu+Tp6y84PlGv5KxY=</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
 </dict>
 </plist>

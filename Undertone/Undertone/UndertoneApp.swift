@@ -32,6 +32,12 @@ final class IslandPanel: NSPanel {
 }
 
 @MainActor final class IslandState: ObservableObject {
+    @Published var alwaysShowNotch = UserDefaults.standard.bool(forKey: "alwaysShowNotch") {
+        didSet { UserDefaults.standard.set(alwaysShowNotch, forKey: "alwaysShowNotch") }
+    }
+    @Published var queueOpen = false
+    @Published var levelKind: String?
+    @Published var levelValue: Double = 0
     @Published var expanded = false
     @Published var previewing = false
     @Published var playbackActive = false
@@ -60,16 +66,17 @@ final class IslandPanel: NSPanel {
     @Published var reverseSwipes = UserDefaults.standard.bool(forKey: "reverseSwipes") {
         didSet { UserDefaults.standard.set(reverseSwipes, forKey: "reverseSwipes") }
     }
-    var dormant: Bool { !playbackActive && !previewing && !expanded && trackNotice == nil }
+    var dormant: Bool { !playbackActive && !previewing && !expanded && trackNotice == nil && levelKind == nil }
     var wingWidth: CGFloat { trackNotice != nil ? 44 : (previewing || swipeEngaged) ? 46 : 34 }
     var swipeVisual: SwipePresentation { SwipePresentation(progress: Double(swipeProgress), reversed: reverseSwipes) }
     var swipeExtension: CGFloat { expanded ? 0 : CGFloat(swipeVisual.extensionWidth) }
     var shellOffset: CGFloat { CGFloat(swipeVisual.forward ? 1 : -1) * swipeExtension / 2 }
-    var shoulder: CGFloat { expanded ? 19 : CGFloat(idleCornerCurve) }
+    var shoulder: CGFloat { expanded ? 19 : levelKind != nil ? max(12, CGFloat(idleCornerCurve)) : CGFloat(idleCornerCurve) }
+    var bottomCornerRadius: CGFloat { expanded ? 50 : levelKind != nil ? 28 : trackNotice == nil ? 17 : 24 }
     var compactWidth: CGFloat { notchWidth + wingWidth * 2 + shoulder * 2 }
     var compactHeight: CGFloat { notchHeight + (previewing || swipeEngaged || trackNotice != nil ? 2 : 1) }
-    var visibleWidth: CGFloat { expanded ? expandedWidth : dormant ? notchWidth : compactWidth + swipeExtension }
-    var visibleHeight: CGFloat { expanded ? expandedHeight + notchHeight : dormant ? notchHeight : compactHeight + (trackNotice == nil ? 0 : 36) }
+    var visibleWidth: CGFloat { expanded ? expandedWidth : levelKind != nil ? max(280, notchWidth + 32) : dormant ? notchWidth : compactWidth + swipeExtension }
+    var visibleHeight: CGFloat { expanded ? expandedHeight + notchHeight + (queueOpen ? 280 : 0) + (levelKind == nil ? 0 : 76) : levelKind != nil ? notchHeight + 72 : dormant ? notchHeight : compactHeight + (trackNotice == nil ? 0 : 36) }
     func open() {
         guard !expanded else { return }
         if haptics {
@@ -79,6 +86,7 @@ final class IslandPanel: NSPanel {
     }
     func close() {
         pinned = false
+        queueOpen = false
         withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : IslandMotion.retract) { expanded = false }
     }
 }
@@ -91,6 +99,14 @@ final class IslandPanel: NSPanel {
         guard let self else { return .zero }
         return CGRect(x: self.anchor.x - self.state.compactWidth / 2, y: self.anchor.y - self.state.compactHeight, width: self.state.compactWidth, height: self.state.compactHeight)
     })
+    private let shortcuts = PlayerShortcuts()
+    private let deviceLevels = DeviceControls()
+    private var levelSampleTime: TimeInterval = 0
+    private var levelDeadline: TimeInterval = 0
+    private var previousVolume: Double?
+    private var previousBrightness: Double?
+    private var previousDisplay = ""
+    private var shortcutObserver: NSObjectProtocol?
     private var panel: IslandPanel?
     private var timer: Timer?
     private var screenObserver: NSObjectProtocol?
@@ -109,6 +125,25 @@ final class IslandPanel: NSPanel {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        shortcuts.action = { [weak self] id in
+            guard let self else { return }
+            switch id {
+            case 1: self.state.expanded ? self.collapsePlayer() : self.showPlayer()
+            case 2: self.spotify.command(.toggle)
+            case 3: self.spotify.command(.next)
+            case 4: self.spotify.restartOrPrevious()
+            case 5: Task { await self.spotify.library.toggleCurrent() }
+            case 6:
+                let defaults = UserDefaults.standard
+                defaults.set(!defaults.bool(forKey: "enableLockScreenPlayer"), forKey: "enableLockScreenPlayer")
+            default: break
+            }
+        }
+        _ = AppUpdates.shared
+        shortcuts.start()
+        shortcutObserver = NotificationCenter.default.addObserver(forName: .init("UndertoneShortcutPreferenceChanged"), object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.shortcuts.start() }
+        }
         let panel = IslandPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -137,6 +172,8 @@ final class IslandPanel: NSPanel {
             guard let self else { return }
             self.timer?.fireDate = asleep ? .distantFuture : Date()
             self.audio.setDisplaySleeping(asleep)
+            self.previousVolume = nil; self.previousBrightness = nil
+            self.state.levelKind = nil
         }
         lockPlayer.start()
         Task { await audio.resumeIfEnabled() }
@@ -165,7 +202,7 @@ final class IslandPanel: NSPanel {
         }
         state.expandedWidth = max(398, state.notchWidth + 208)
         state.expandedHeight = (state.expandedWidth - 38) / 360 * 189 - state.notchHeight
-        let size = CGSize(width: state.expandedWidth + 40, height: state.expandedHeight + state.notchHeight + 48)
+        let size = CGSize(width: state.expandedWidth + 40, height: state.expandedHeight + state.notchHeight + 48 + 356)
         panel.setFrame(NSRect(x: anchor.x - size.width / 2, y: anchor.y - size.height, width: size.width, height: size.height), display: true)
     }
 
@@ -173,6 +210,21 @@ final class IslandPanel: NSPanel {
         guard let panel else { return }
         state.playbackActive = spotify.connected && spotify.playing
         let now = ProcessInfo.processInfo.systemUptime
+        // Read actual levels after macOS handles media keys; no keyboard interception.
+        if now - levelSampleTime > 0.18 {
+            levelSampleTime = now
+            deviceLevels.refresh()
+            if deviceLevels.volumeAvailable, let old = previousVolume, abs(old - deviceLevels.volume) > 0.002 {
+                state.levelKind = "Volume"; state.levelValue = deviceLevels.volume; levelDeadline = now + 1.6
+            }
+            if deviceLevels.brightnessAvailable, previousDisplay == deviceLevels.displayName, let old = previousBrightness, abs(old - deviceLevels.brightness) > 0.002 {
+                state.levelKind = "Brightness"; state.levelValue = deviceLevels.brightness; levelDeadline = now + 1.6
+            }
+            previousVolume = deviceLevels.volumeAvailable ? deviceLevels.volume : nil
+            previousBrightness = deviceLevels.brightnessAvailable ? deviceLevels.brightness : nil
+            previousDisplay = deviceLevels.displayName
+        }
+        if state.levelKind != nil && now > levelDeadline { state.levelKind = nil }
         if spotify.trackRevision != lastTrackRevision {
             lastTrackRevision = spotify.trackRevision
             if state.playbackActive && !state.expanded {
@@ -207,7 +259,7 @@ final class IslandPanel: NSPanel {
         if inside {
             leaveTime = nil
             if shouldOpen { state.open() }
-        } else if state.expanded, !state.pinned, !state.settingsOpen, NSEvent.pressedMouseButtons == 0 {
+        } else if state.expanded, !state.pinned, !state.settingsOpen, !spotify.quickControlsOpen, NSEvent.pressedMouseButtons == 0 {
             if leaveTime == nil { leaveTime = Date() }
             if let leaveTime, Date().timeIntervalSince(leaveTime) > 0.45 {
                 state.close()
@@ -217,7 +269,7 @@ final class IslandPanel: NSPanel {
     }
 
     private func handleScroll(_ event: NSEvent) -> NSEvent? {
-        guard event.window === panel, !state.settingsOpen, event.hasPreciseScrollingDeltas else { return event }
+        guard event.window === panel, !state.settingsOpen, !state.queueOpen, event.hasPreciseScrollingDeltas else { return event }
         let now = ProcessInfo.processInfo.systemUptime
         // Filter out scrolls on the transparent canvas and on settings popovers.
         let width = state.visibleWidth
@@ -279,6 +331,8 @@ final class IslandPanel: NSPanel {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        shortcuts.stop()
+        if let shortcutObserver { NotificationCenter.default.removeObserver(shortcutObserver) }
         swipeSettleTask?.cancel()
         timer?.invalidate()
         lockPlayer.shutdown()
@@ -335,8 +389,11 @@ struct IslandView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
-                if state.expanded {
-                    PlayerView(spotify: spotify, audio: audio, openLibrarySettings: { state.settingsOpen = true })
+                if !state.expanded, let kind = state.levelKind {
+                    Color.clear.frame(height: state.notchHeight)
+                    NotchLevelView(kind: kind, value: state.levelValue, expanded: false).frame(height: 72)
+                } else if state.expanded {
+                    PlayerView(spotify: spotify, audio: audio, openLibrarySettings: { state.settingsOpen = true }, queueAction: { withAnimation(reduceMotion ? nil : IslandMotion.morph) { state.queueOpen.toggle() } }, queueActive: state.queueOpen)
                         .frame(height: state.expandedHeight + state.notchHeight, alignment: .top)
                         .overlay(alignment: .topTrailing) {
                             Button { state.settingsOpen = true } label: {
@@ -352,6 +409,11 @@ struct IslandView: View {
                         }
                         .contextMenu { Button("Settings…") { state.settingsOpen = true } }
                         .transition(.opacity)
+                    if let kind = state.levelKind { NotchLevelView(kind: kind, value: state.levelValue, expanded: true).frame(height: 76) }
+                    if state.queueOpen {
+                        NotchQueueView(spotify: spotify, library: spotify.library)
+                            .frame(height: 280).transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 } else {
                     HStack(spacing: 0) {
                         Button { spotify.command(.toggle) } label: {
@@ -417,20 +479,29 @@ struct IslandView: View {
             .frame(width: state.visibleWidth,
                    height: state.visibleHeight,
                    alignment: .top)
-            .background { IslandSurface(glass: state.glassAppearance && state.expanded, shoulder: state.shoulder) }
-            .clipShape(IslandShape(shoulder: state.shoulder, bottomRadius: state.expanded ? 46 : state.trackNotice == nil ? 10 : 20))
+            .background {
+                IslandSurface(glass: state.glassAppearance && state.expanded, shoulder: state.shoulder)
+                    .overlay(alignment: .bottom) {
+                        if UserDefaults.standard.bool(forKey: "artworkAccent") && state.expanded {
+                            LinearGradient(colors: [.clear, Color(nsColor: spotify.waveformTint).opacity(0.16)], startPoint: .top, endPoint: .bottom).allowsHitTesting(false)
+                        }
+                    }
+            }
+            .clipShape(IslandShape(shoulder: state.shoulder, bottomRadius: state.bottomCornerRadius))
             .overlay {
                 if state.whiteOutline {
-                    IslandShape(shoulder: state.shoulder, bottomRadius: state.expanded ? 46 : state.trackNotice == nil ? 10 : 20, openTop: true).stroke(.white.opacity(0.65), lineWidth: 0.75)
+                    IslandShape(shoulder: state.shoulder, bottomRadius: state.bottomCornerRadius, openTop: true).stroke(.white.opacity(0.65), lineWidth: 0.75)
                         .padding(0.375).allowsHitTesting(false)
                 }
             }
             .offset(x: state.shellOffset)
-            .opacity(state.dormant ? 0 : 1)
+            .opacity(state.dormant && !state.alwaysShowNotch ? 0 : 1)
             .shadow(color: .black.opacity(state.expanded ? 0.32 : 0.22), radius: state.expanded ? 14 : 5, y: state.expanded ? 7 : 3)
             .animation(reduceMotion ? nil : state.swipeTracking ? IslandMotion.finger : IslandMotion.swipeReturn, value: state.swipeProgress)
             .animation(reduceMotion ? nil : IslandMotion.hover, value: state.swipeEngaged)
             .animation(reduceMotion ? nil : state.expanded ? IslandMotion.morph : IslandMotion.retract, value: state.expanded)
+            .animation(reduceMotion ? nil : IslandMotion.morph, value: state.queueOpen)
+            .animation(reduceMotion ? nil : IslandMotion.morph, value: state.levelKind)
             .animation(reduceMotion ? nil : IslandMotion.hover, value: state.previewing)
             .animation(reduceMotion ? nil : IslandMotion.hover, value: state.idleCornerCurve)
             .animation(reduceMotion ? nil : IslandMotion.preview, value: state.glassAppearance)
@@ -660,10 +731,13 @@ struct PlayerView: View {
     @ObservedObject var spotify: SpotifyController
     @ObservedObject var audio: AudioCapture
     let openLibrarySettings: () -> Void
+    var queueAction: (() -> Void)? = nil
+    var queueActive = false
     var artworkAction: (() -> Void)? = nil
     var locked = false
     var hideArtwork = false
-    @State private var seeking = false
+    @AppStorage("artworkAccent") private var artworkAccent = false
+        @State private var seeking = false
     @State private var seekPosition: Double = 0
     @State private var progressHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -699,8 +773,13 @@ struct PlayerView: View {
                 .offset(x: 303, y: 34)
                 progress.frame(width: 312, height: 20).offset(x: 24, y: 93)
                 SpotifyHeart(library: spotify.library, playbackConnected: spotify.connected, openSettings: openLibrarySettings)
-                    .position(x: 77, y: 148)
+                    .position(x: queueAction == nil ? 77 : 46, y: 148)
                     .disabled(locked && (!spotify.library.connected || spotify.library.error != nil))
+                if let queueAction {
+                    Button(action: queueAction) { Image(systemName: "list.bullet").font(.system(size: 17, weight: .semibold)).frame(width: 30, height: 36) }
+                        .buttonStyle(SpringControlStyle()).foregroundStyle(queueActive ? .white : Color(white: 0.48))
+                        .accessibilityLabel(queueActive ? "Close song queue" : "Open song queue").position(x: 84, y: 148)
+                }
                 control("backward.fill", label: "Previous track", size: 22) { spotify.command(.previous) }
                     .position(x: 126, y: 148)
                 control(spotify.playing ? "pause.fill" : "play.fill", label: spotify.playing ? "Pause" : "Play", size: 27) { spotify.command(.toggle) }
@@ -723,7 +802,7 @@ struct PlayerView: View {
                 let value = seeking ? seekPosition : spotify.position
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color(white: 0.14))
-                    Rectangle().fill(Color(white: seeking || progressHovered ? 0.94 : 0.65))
+                    Rectangle().fill(artworkAccent ? Color(nsColor: spotify.waveformTint) : Color(white: seeking || progressHovered ? 0.94 : 0.65))
                         .frame(width: geometry.size.width * min(1, max(0, value / duration)))
                 }
                 .clipShape(Capsule()).frame(height: 8).frame(maxHeight: .infinity)

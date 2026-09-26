@@ -11,6 +11,9 @@ struct SettingsDashboard: View {
     @AppStorage("lockPlayerAmbientGlow") private var ambientGlow = true
     @AppStorage("lockPlayerSyncedLyrics") private var syncedLyrics = false
     @AppStorage("lockPlayerUnlockAnimation") private var unlockAnimation = true
+    @StateObject private var login = LoginLaunch()
+    @AppStorage("enablePlayerShortcuts") private var shortcuts = true
+    @AppStorage("artworkAccent") private var artworkAccent = false
     @State var selectedTab = 0
     var body: some View {
         VStack(spacing: 0) {
@@ -30,11 +33,21 @@ struct SettingsDashboard: View {
     }
     private var general: some View {
         Form {
+            Section("Startup & shortcuts") {
+                Toggle("Launch at login", isOn: Binding(get: { login.enabled }, set: login.set))
+                if let message = login.message { Text(message).font(.caption).foregroundStyle(.secondary) }
+                Toggle("Global player shortcuts", isOn: $shortcuts)
+                    .onChange(of: shortcuts) { _ in NotificationCenter.default.post(name: .init("UndertoneShortcutPreferenceChanged"), object: nil) }
+                Text("⌘⌥U Player · ⌘⌥Space Play/Pause · ⌘⌥←/→ Previous/Next · ⌘⌥L Like · ⌘⌥K Lock player")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Player") {
                 Toggle("Hover haptics", isOn: $state.haptics)
                 Toggle("Keep player expanded", isOn: $state.pinned)
                 Toggle("Reverse swipe direction", isOn: $state.reverseSwipes)
             }
+            Section("Sleep timer") { SleepTimerSettings(timer: spotify.sleepTimer) { spotify.pause() } }
+            Section("Updates") { UpdateSettings() }
             Section("Spotify") {
                 LabeledContent("Connection", value: spotify.connected ? "Connected automatically" : "Waiting for Spotify")
                 Text("Undertone connects when Spotify opens and retries temporary errors. The first connection requires Automation permission.")
@@ -81,6 +94,9 @@ struct SettingsDashboard: View {
     private var appearance: some View {
         Form {
             Section("Notch") {
+                Toggle("Always show notch", isOn: $state.alwaysShowNotch)
+                Text("Keep a black notch visible while idle, including on Macs without a camera notch.").font(.caption).foregroundStyle(.secondary)
+                Toggle("Artwork colour accents", isOn: $artworkAccent)
                 Toggle("Thin white outline", isOn: $state.whiteOutline)
                 Toggle("Black to Liquid Glass", isOn: $state.glassAppearance)
                 Text("Black around the camera, fading into glass in the expanded player.")

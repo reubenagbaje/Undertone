@@ -10,7 +10,7 @@ struct SpotifyAuthError: LocalizedError {
 
 enum SpotifyOAuth {
     static let redirect = "http://127.0.0.1:43821/callback"
-    static let scopes = "user-library-read user-library-modify"
+    static let scopes = "user-library-read user-library-modify user-read-playback-state user-read-currently-playing"
     static func randomString() throws -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {

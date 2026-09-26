@@ -20,6 +20,8 @@ import Combine
     @Published var playing = false
     @Published var shuffling = false
     let library = SpotifyLibrary()
+    let sleepTimer = SleepTimer()
+    @Published var quickControlsOpen = false
     private(set) var trackID = ""
     @Published var volume: Double = 50
     private var retry = SpotifyReconnectPolicy()
@@ -74,6 +76,7 @@ import Combine
     }
     func shutdown() {
         timer?.invalidate(); timer = nil
+        sleepTimer.cancel()
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         workspaceObservers.removeAll()
         artworkTask?.cancel(); feedbackTask?.cancel()
@@ -200,6 +203,14 @@ import Combine
             self.error = message
             self.refresh() // Also restores Spotify's position if seeking failed.
         }
+    }
+    func pause() {
+        guard connected else { return }
+        run("pause") { [weak self] _, message in self?.error = message; self?.refresh() }
+    }
+    func playURI(_ raw: String) {
+        guard connected, let uri = SpotifyOAuth.trackURI(raw) else { return }
+        run("play track \"\(uri)\"") { [weak self] _, message in self?.error = message; self?.refresh() }
     }
     func toggleShuffle() {
         guard connected else { return }

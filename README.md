@@ -1,3 +1,11 @@
+<div align="center">
+  <img src="Undertone/Design/Undertone-Icon.png" alt="Undertone app icon" width="160" />
+
+  <h1>Undertone</h1>
+  <p>A Spotify player that brings your Mac’s notch to life.</p>
+  <p><strong>Made by Reuben Agbaje</strong></p>
+</div>
+
 Undertone turns the notch into a compact music player with a real Spotify-reactive waveform, fluid swipe gestures and playback controls. Hover to reveal your music, swipe to change tracks, and keep your desktop clear when playback stops.
 
 Built with **Swift, SwiftUI and AppKit** for macOS.
@@ -14,6 +22,14 @@ Built with **Swift, SwiftUI and AppKit** for macOS.
 - **Custom appearance** — optional black-to-Liquid-Glass background, soft shadows, a thin outline without a top border, and adjustable compact top corners.
 - **Quiet when idle** — hides behind the notch when playback stops; hover just beneath the camera to bring it back.
 
+## Now Playing and Settings dashboard
+
+Version 1.21 includes a native tabbed Settings window, automatic Spotify reconnection, and an iOS-inspired Now Playing card with artwork ambience, transport/seek/Spotify-volume controls, imported timed lyrics and a spring transition back to the notch.
+
+Try **Settings → Modules → Preview Now Playing**. Tap the artwork to expand it across the display, then tap again to collapse into a compact glass panel. The **Lock Screen Media Player** toggle enables the experimental lock overlay, now using a private SkyLight system Space and mouse-only media controls. While locked, the smaller, dark player is centred above the lower authentication area. Actual lock-screen visibility still requires testing on the target Mac; it is not guaranteed by a window level or desktop preview. Lyrics require an imported `.lrc` file; they are not fetched from Spotify.
+
+See [implementation, integration snippets and platform limits](Undertone/LOCK-PLAYER-INTEGRATION.md).
+
 ## Requirements
 
 - macOS **13 or later**.
@@ -25,13 +41,13 @@ A notched MacBook gives the intended appearance. On displays without a notch, Un
 
 ## Installation
 
-1. Download `Undertone-Notch-v1.14-Mac.zip` from this repository’s **Releases**, once published.
+1. Download [Undertone v1.21](Undertone-Notch-v1.21-Mac.zip).
 2. Unzip it and move **Undertone.app** to Applications.
 3. Open Undertone, then open Spotify and play a song.
-4. Hover over the middle of the notch to open the player. Use **Connect Spotify** or **Settings → Reconnect** if needed.
+4. Undertone connects to Spotify automatically. Approve Automation access if requested; use **Settings → General → Retry connection** after resolving a permission denial.
 5. Enable **Spotify audio** in Settings and grant the requested macOS permissions.
 
-Undertone runs without a Dock icon. Hover near the upper-right of the expanded player to reveal the **…** settings button. Settings also contains **Quit**.
+Undertone runs without a Dock icon. Hover near the upper-right of the expanded player to reveal the **…** settings button. This opens the native Settings window, also available with **⌘,** while Undertone is active. Settings contains General, Modules and Appearance tabs, plus **Quit Undertone**.
 
 The supplied build is locally signed and **not notarized**, so macOS may require an explicit opening confirmation. Only open downloads you trust. For updates, quit the old copy before replacing it.
 
@@ -67,7 +83,7 @@ Desktop playback controls work separately from the optional Spotify account conn
 
 Authentication uses Authorization Code with PKCE. Tokens are stored in **macOS Keychain**. The requested scopes are `user-library-read` and `user-library-modify`.
 
-See [Spotify setup and troubleshooting](SPOTIFY-SETUP.md) for more detail.
+See [Spotify setup and troubleshooting](Undertone/SPOTIFY-SETUP.md) for more detail.
 
 ## Permissions and privacy
 
@@ -89,7 +105,7 @@ The direct-distribution build uses hardened runtime with the Apple Events entitl
 
 ## Build from source
 
-Open `Undertone.xcodeproj` in Xcode, select the **Undertone** scheme and **My Mac**, choose your signing team or **Sign to Run Locally**, then press **⌘R**. The project has been built with Xcode 26.6.
+Open `Undertone/Undertone.xcodeproj` in Xcode, select the **Undertone** scheme and **My Mac**, choose your signing team or **Sign to Run Locally**, then press **⌘R**. The project has been built with Xcode 26.6.
 
 For a universal Release build, run from the directory containing the Xcode project:
 
@@ -118,7 +134,7 @@ For a manual check, play Spotify alongside audio from another app and confirm th
 
 **The waveform is flat:** make sure Spotify is playing on this Mac, enable Spotify audio, check recording permission for the current copy of Undertone, then use **Restart audio**. On macOS 14.2 and later, capture waits for Spotify and reconnects when its audio processes change. Older systems may need capture restarted after Spotify reopens.
 
-**Playback controls do not respond:** open Spotify, check Automation permission and click **Reconnect**.
+**Playback controls do not respond:** open Spotify, check Automation permission and click **Retry connection**.
 
 **Hover does not open after a swipe:** move the pointer away, then return and hold it over the centre of the notch.
 
@@ -141,3 +157,7 @@ For a manual check, play Spotify alongside audio from another app and confirm th
 **Made by Reuben Agbaje.**
 
 Undertone is an independent project and is not affiliated with or endorsed by Spotify or Apple. Spotify and Apple trademarks belong to their respective owners.
+
+Version 1.20: Settings → Modules → Liquid Glass player enables native glass on macOS 26+, with material fallback on older systems. Reduce Transparency keeps the card opaque. The fuller card has 24 extra points of vertical padding and sits 18 points above the reserved authentication area. Its thumbnail hides and the heading widens while full-screen artwork is expanded.
+
+Version 1.21 enlarges and strengthens the shared transport icons and progress bar. Seeking updates the displayed position immediately, disables progress interpolation while dragging, and rejects polls started before or during a seek. The next fresh poll reconciles with Spotify, including after failed seeks.

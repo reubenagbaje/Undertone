@@ -3,6 +3,11 @@ import CoreGraphics
 
 @main struct MediaModuleTests {
     static func main() {
+        assert(ActivityDownloadURL.parse(" https://example.com/file.zip ")?.lastPathComponent == "file.zip")
+        for invalid in ["file:///tmp/test", "http://example.com", "https://user:secret@example.com/file", "not a URL"] {
+            assert(ActivityDownloadURL.parse(invalid) == nil)
+        }
+        print("PASS: download URL normalization and unsupported URL rejection")
         var sleep = SleepSchedule()
         let start = Date(timeIntervalSince1970: 1000)
         sleep.start(minutes: 15, now: start)

@@ -9,3 +9,6 @@ build/tests/SpotifyTests
 
 swiftc -parse-as-library -module-cache-path build/ModuleCache Undertone/MediaModuleModels.swift Tests/MediaModuleTests.swift -o build/tests/MediaModuleTests
 build/tests/MediaModuleTests
+
+swiftc -parse-as-library -module-cache-path build/ModuleCache -framework JavaScriptCore Tests/BrowserAdapterTests.swift -o build/tests/BrowserAdapterTests
+build/tests/BrowserAdapterTests

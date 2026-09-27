@@ -22,6 +22,12 @@ Built with **Swift, SwiftUI and AppKit** for macOS.
 - **Custom appearance** — optional black-to-Liquid-Glass background, soft shadows, a thin outline without a top border, and adjustable compact top corners.
 - **Quiet when idle** — hides behind the notch when playback stops; hover just beneath the camera to bring it back.
 
+## New in v1.26
+
+The expanded player now has a Tools panel for countdown timers, downloads, a drag-and-drop file shelf and audio output switching. Optional battery and AirPods/Beats notices appear in the island. General settings add Apple Music and compatible Safari/Chrome active-tab playback; Modules adds display placement, size presets, animation intensity and presentation mode. Brightness popup replacement joins volume replacement under General → Volume indicator and needs Accessibility permission.
+
+See [feature setup and limitations](NEW-FEATURES.md) before using browser playback or hardware-specific features. Not every browser site or Bluetooth device exposes the necessary information.
+
 ## New in v1.25
 
 Appearance → Display style → Dynamic Island adds a floating pill with adjustable distance below the menu bar. It retains the player, queue, gestures and volume/brightness indicators. General → Volume indicator → Replace macOS volume popup optionally intercepts volume keys after Accessibility permission; click Allow Accessibility, grant permission, then Retry. This does not suppress the brightness popup. See [feature notes](NEW-FEATURES.md).
@@ -110,7 +116,7 @@ Permission labels vary by macOS version. Review them under **System Settings →
 
 - Audio is analysed locally. It is **never recorded, saved or uploaded**.
 - The older capture fallback immediately discards screen frames.
-- Core playback does not require microphone, Accessibility or Input Monitoring permission. The optional system-volume-popup replacement requires Accessibility permission.
+- Core playback does not require microphone, Accessibility or Input Monitoring permission. The optional system-volume/brightness-popup replacement requires Accessibility permission. AirPods/Beats notifications may request Bluetooth access when enabled.
 - Artwork and account/library requests communicate with Spotify. There is no analytics service.
 - Spotify credentials are not included in the source project.
 

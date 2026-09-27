@@ -4,15 +4,15 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>Undertone</title>
         <item>
-            <title>1.25</title>
-            <pubDate>Sun, 27 Sep 2026 09:52:03 +0100</pubDate>
-            <sparkle:version>29</sparkle:version>
-            <sparkle:shortVersionString>1.25</sparkle:shortVersionString>
+            <title>1.26</title>
+            <pubDate>Sun, 27 Sep 2026 18:13:52 +0100</pubDate>
+            <sparkle:version>30</sparkle:version>
+            <sparkle:shortVersionString>1.26</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/reubenagbaje/Undertone/releases/download/v1.25/Undertone-Notch-v1.25-Mac.zip" length="4427173" type="application/octet-stream" sparkle:edSignature="mK6W+CqUaIF0tAh0a6NC7j87uGOJJKmhG8dGY15M5nPnGKujp9zR6fvUUYHiSW0JjsIThSt5plv1VEQxexR5DQ=="></enclosure>
+            <enclosure url="https://github.com/reubenagbaje/Undertone/releases/download/v1.26/Undertone-Notch-v1.26-Mac.zip" length="4662661" type="application/octet-stream" sparkle:edSignature="5whceqZet/Og7QoC52ivcRlm3kYPVn5A5ovn6up9IfGkJ5y62/7zJho20aiMFNp915lMStRyl+g1Vnzdqq6iAg=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: REqJ2rIXMIpNqimHz/Ql4sYAJLmsvMrVsWHHNpeZBcQqu9DnqUB0w8oOpk9M1K9P6OeMsHtcIqj+AINpHkH9Ag==
+edSignature: aER9FHXKuHyND+BaPZJs6yNh5yVRXEv+PzITA/wBqbdYeAVj5wbr4eDIr6O18Q6jWKmGz9cyW8i8rnybi32ZDg==
 length: 1056
 -->

@@ -176,6 +176,21 @@ final class MockSpotify: URLProtocol {
         try await waitUntil { racingMetadata.explicitTrack != nil }
         try await Task.sleep(nanoseconds: 200_000_000)
         check(racingMetadata.explicitTrack == false, "Cancelled old track metadata cannot badge the next song")
+        let queued = SpotifyLibrary(session: session, store: MemoryCredentials())
+        MockSpotify.enqueue([.init(method: "GET", path: "/v1/me/player/queue", body: "{\"queue\":[{\"uri\":\"\(a)\",\"name\":\"Queued song\",\"artists\":[{\"name\":\"Artist\"}]}]}")])
+        await queued.loadQueue()
+        check(queued.queue.count == 1 && queued.queue[0].subtitle == "Artist", "Queue maps Spotify metadata")
+        MockSpotify.enqueue([.init(method: "GET", path: "/v1/me/player/queue", status: 403)])
+        await queued.loadQueue()
+        check(queued.queueError != nil && !queued.queueLoading, "Queue permission error is recoverable")
+        MockSpotify.enqueue([.init(method: "GET", path: "/v1/me/player/queue", body: "{\"queue\":[]}", delay: 0.1)])
+        let queueTask = Task { await queued.loadQueue() }
+        try await waitUntil { queued.queueLoading }
+        queued.disconnect()
+        await queueTask.value
+        check(queued.queue.isEmpty && !queued.queueLoading, "Disconnect clears queue and rejects stale response")
+        check(SpotifyOAuth.scopes.contains("user-read-currently-playing"), "Queue permission requested")
+        print("PASS: queue parsing, missing permissions and disconnect race")
         MockSpotify.validate()
         session.invalidateAndCancel()
         print("PASS: explicit/clean catalog flags, metadata cache/backoff/cancellation, PKCE, callback/state validation, form encoding, track validation, library reads, save/remove, failure rollback, track-change race, disconnect, token refresh and rate-limit backoff")

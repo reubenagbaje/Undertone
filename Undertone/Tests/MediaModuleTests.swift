@@ -3,6 +3,16 @@ import CoreGraphics
 
 @main struct MediaModuleTests {
     static func main() {
+        var sleep = SleepSchedule()
+        let start = Date(timeIntervalSince1970: 1000)
+        sleep.start(minutes: 15, now: start)
+        assert(!sleep.consumeExpiration(now: start.addingTimeInterval(899)))
+        assert(sleep.consumeExpiration(now: start.addingTimeInterval(901)))
+        assert(!sleep.consumeExpiration(now: start.addingTimeInterval(902)))
+        sleep.start(minutes: 30, now: start); sleep.cancel()
+        assert(!sleep.consumeExpiration(now: start.addingTimeInterval(4000)))
+        sleep.start(minutes: 0, now: start); assert(sleep.deadline == nil)
+        print("PASS: sleep deadline, wake-after-deadline, cancellation and exactly-once expiration")
         var seek = PlaybackSeekState()
         assert(seek.accepts(revision: 0, pendingAtStart: false))
         let first = seek.begin()

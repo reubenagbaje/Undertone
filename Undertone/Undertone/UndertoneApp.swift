@@ -32,6 +32,12 @@ final class IslandPanel: NSPanel {
 }
 
 @MainActor final class IslandState: ObservableObject {
+    @Published var dynamicIsland = UserDefaults.standard.bool(forKey: "dynamicIsland") {
+        didSet { UserDefaults.standard.set(dynamicIsland, forKey: "dynamicIsland") }
+    }
+    @Published var islandGap = min(80, max(8, UserDefaults.standard.object(forKey: "islandGap") as? Double ?? 12)) {
+        didSet { UserDefaults.standard.set(islandGap, forKey: "islandGap") }
+    }
     @Published var alwaysShowNotch = UserDefaults.standard.bool(forKey: "alwaysShowNotch") {
         didSet { UserDefaults.standard.set(alwaysShowNotch, forKey: "alwaysShowNotch") }
     }
@@ -71,9 +77,9 @@ final class IslandPanel: NSPanel {
     var swipeVisual: SwipePresentation { SwipePresentation(progress: Double(swipeProgress), reversed: reverseSwipes) }
     var swipeExtension: CGFloat { expanded ? 0 : CGFloat(swipeVisual.extensionWidth) }
     var shellOffset: CGFloat { CGFloat(swipeVisual.forward ? 1 : -1) * swipeExtension / 2 }
-    var shoulder: CGFloat { expanded ? 19 : levelKind != nil ? max(12, CGFloat(idleCornerCurve)) : CGFloat(idleCornerCurve) }
+    var shoulder: CGFloat { dynamicIsland ? 0 : expanded ? 19 : levelKind != nil ? max(12, CGFloat(idleCornerCurve)) : CGFloat(idleCornerCurve) }
     var bottomCornerRadius: CGFloat { expanded ? 50 : levelKind != nil ? 28 : trackNotice == nil ? 17 : 24 }
-    var compactWidth: CGFloat { notchWidth + wingWidth * 2 + shoulder * 2 }
+    var compactWidth: CGFloat { notchWidth + wingWidth * 2 + shoulder * 2 + (dynamicIsland ? 20 : 0) }
     var compactHeight: CGFloat { notchHeight + (previewing || swipeEngaged || trackNotice != nil ? 2 : 1) }
     var visibleWidth: CGFloat { expanded ? expandedWidth : levelKind != nil ? max(280, notchWidth + 32) : dormant ? notchWidth : compactWidth + swipeExtension }
     var visibleHeight: CGFloat { expanded ? expandedHeight + notchHeight + (queueOpen ? 280 : 0) + (levelKind == nil ? 0 : 76) : levelKind != nil ? notchHeight + 72 : dormant ? notchHeight : compactHeight + (trackNotice == nil ? 0 : 36) }
@@ -106,6 +112,8 @@ final class IslandPanel: NSPanel {
     private var previousVolume: Double?
     private var previousBrightness: Double?
     private var previousDisplay = ""
+    private var lastIslandStyle = false
+    private var lastIslandGap: Double = -1
     private var shortcutObserver: NSObjectProtocol?
     private var panel: IslandPanel?
     private var timer: Timer?
@@ -140,6 +148,12 @@ final class IslandPanel: NSPanel {
             }
         }
         _ = AppUpdates.shared
+        NotchVolumeKeys.shared.onLevel = { [weak self] value in
+            guard let self else { return }
+            self.state.levelKind = "Volume"; self.state.levelValue = value
+            self.levelDeadline = ProcessInfo.processInfo.systemUptime + 1.6
+        }
+        NotchVolumeKeys.shared.configure()
         shortcuts.start()
         shortcutObserver = NotificationCenter.default.addObserver(forName: .init("UndertoneShortcutPreferenceChanged"), object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.shortcuts.start() }
@@ -191,7 +205,14 @@ final class IslandPanel: NSPanel {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.screens.first,
               let panel else { return }
         let inset = screen.safeAreaInsets.top
-        if inset > 0, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+        lastIslandStyle = state.dynamicIsland
+        lastIslandGap = state.islandGap
+        if state.dynamicIsland {
+            state.notchWidth = 104
+            state.notchHeight = 40
+            let menuInset = max(inset, max(24, screen.frame.maxY - screen.visibleFrame.maxY))
+            anchor = CGPoint(x: screen.frame.midX, y: screen.frame.maxY - menuInset - state.islandGap)
+        } else if inset > 0, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
             state.notchWidth = max(1, right.minX - left.maxX)
             state.notchHeight = inset
             anchor = CGPoint(x: (left.maxX + right.minX) / 2, y: screen.frame.maxY)
@@ -203,11 +224,12 @@ final class IslandPanel: NSPanel {
         state.expandedWidth = max(398, state.notchWidth + 208)
         state.expandedHeight = (state.expandedWidth - 38) / 360 * 189 - state.notchHeight
         let size = CGSize(width: state.expandedWidth + 40, height: state.expandedHeight + state.notchHeight + 48 + 356)
-        panel.setFrame(NSRect(x: anchor.x - size.width / 2, y: anchor.y - size.height, width: size.width, height: size.height), display: true)
+        panel.setFrame(NSRect(x: anchor.x - size.width / 2, y: anchor.y - size.height, width: size.width, height: size.height + (state.dynamicIsland ? 12 : 0)), display: true)
     }
 
     private func updatePointer() {
         guard let panel else { return }
+        if state.dynamicIsland != lastIslandStyle || state.islandGap != lastIslandGap { position() }
         state.playbackActive = spotify.connected && spotify.playing
         let now = ProcessInfo.processInfo.systemUptime
         // Read actual levels after macOS handles media keys; no keyboard interception.
@@ -252,7 +274,7 @@ final class IslandPanel: NSPanel {
         let cameraTarget = NSRect(x: anchor.x - state.notchWidth / 2,
                                   y: anchor.y - state.notchHeight - 4,
                                   width: state.notchWidth, height: state.notchHeight + 4)
-        let canExpand = state.expanded || NotchHitTarget.contains(pointer, in: cameraTarget)
+        let canExpand = state.expanded || (state.dynamicIsland ? inside : NotchHitTarget.contains(pointer, in: cameraTarget))
         let shouldOpen = hoverIntent.update(inside: inside && canExpand && !suppressHoverUntilExit, now: now)
         _ = peekIntent.update(inside: inside && !suppressHoverUntilExit, now: now)
         state.previewing = peekIntent.previewing || (inside && suppressHoverUntilExit)
@@ -331,6 +353,7 @@ final class IslandPanel: NSPanel {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NotchVolumeKeys.shared.stop()
         shortcuts.stop()
         if let shortcutObserver { NotificationCenter.default.removeObserver(shortcutObserver) }
         swipeSettleTask?.cancel()
@@ -347,11 +370,15 @@ struct IslandShape: Shape {
     var shoulder: CGFloat = 0
     var bottomRadius: CGFloat = 52
     var openTop = false
+    var floating = false
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(shoulder, bottomRadius) }
         set { shoulder = newValue.first; bottomRadius = newValue.second }
     }
     func path(in rect: CGRect) -> Path {
+        if floating {
+            return RoundedRectangle(cornerRadius: min(rect.height / 2, 38), style: .continuous).path(in: rect)
+        }
         let inset = max(0, shoulder)
         let left = rect.minX + inset
         let right = rect.maxX - inset
@@ -480,17 +507,17 @@ struct IslandView: View {
                    height: state.visibleHeight,
                    alignment: .top)
             .background {
-                IslandSurface(glass: state.glassAppearance && state.expanded, shoulder: state.shoulder)
+                IslandSurface(glass: state.glassAppearance && state.expanded, shoulder: state.shoulder, floating: state.dynamicIsland)
                     .overlay(alignment: .bottom) {
                         if UserDefaults.standard.bool(forKey: "artworkAccent") && state.expanded {
                             LinearGradient(colors: [.clear, Color(nsColor: spotify.waveformTint).opacity(0.16)], startPoint: .top, endPoint: .bottom).allowsHitTesting(false)
                         }
                     }
             }
-            .clipShape(IslandShape(shoulder: state.shoulder, bottomRadius: state.bottomCornerRadius))
+            .clipShape(IslandShape(shoulder: state.shoulder, bottomRadius: state.bottomCornerRadius, floating: state.dynamicIsland))
             .overlay {
                 if state.whiteOutline {
-                    IslandShape(shoulder: state.shoulder, bottomRadius: state.bottomCornerRadius, openTop: true).stroke(.white.opacity(0.65), lineWidth: 0.75)
+                    IslandShape(shoulder: state.shoulder, bottomRadius: state.bottomCornerRadius, openTop: !state.dynamicIsland, floating: state.dynamicIsland).stroke(.white.opacity(0.65), lineWidth: 0.75)
                         .padding(0.375).allowsHitTesting(false)
                 }
             }
@@ -510,6 +537,7 @@ struct IslandView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, state.dynamicIsland ? 12 : 0)
         .overlay { SettingsRequestHandler(state: state) }
         .preferredColorScheme(.dark).ignoresSafeArea()
     }
@@ -520,12 +548,13 @@ struct IslandView: View {
 struct IslandSurface: View {
     let glass: Bool
     let shoulder: CGFloat
+    var floating = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
         if glass && !reduceTransparency {
             ZStack {
                 if #available(macOS 26.0, *) {
-                    Color.clear.glassEffect(.regular, in: IslandShape(shoulder: shoulder, bottomRadius: 46))
+                    Color.clear.glassEffect(.regular, in: IslandShape(shoulder: shoulder, bottomRadius: 46, floating: floating))
                 } else {
                     Rectangle().fill(.ultraThinMaterial)
                 }

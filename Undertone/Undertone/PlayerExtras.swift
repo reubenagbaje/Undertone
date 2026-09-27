@@ -74,6 +74,11 @@ import Sparkle
             }
         }
     }
+    func setMuted(_ muted: Bool) -> Bool {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute, mScope: kAudioDevicePropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = muted ? 1 : 0
+        return AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<UInt32>.size), &value) == noErr
+    }
     func changeBrightness(_ value: Double) {
         guard brightnessAvailable, value.isFinite else { return }
         brightness = min(1, max(0.05, value))
@@ -244,5 +249,102 @@ struct UpdateSettings: View {
         Toggle("Download and install updates automatically", isOn: Binding(get: { updates.installAutomatically }, set: { updates.installAutomatically = $0 })).disabled(!updates.automatic)
         Button("Check for Updates…") { updates.check() }
         Text("Updates are verified before installation. Updates are delivered from the official Undertone GitHub releases.").font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+// Filter only volume media keys. All other events pass through unchanged.
+@MainActor final class NotchVolumeKeys: ObservableObject {
+    static let shared = NotchVolumeKeys()
+    @Published var status = "Enable to replace the system volume popup."
+    private var tap: CFMachPort?
+    private var source: CFRunLoopSource?
+    private let device = DeviceControls()
+    private var consumed = Set<Int>()
+    private var restoreVolume: Double = 0.5
+    private var lockObservers: [NSObjectProtocol] = []
+    private var locked = false
+    private init() {
+        for (name, value) in [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false)] {
+            lockObservers.append(DistributedNotificationCenter.default().addObserver(forName: .init(name), object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.locked = value
+                    if value { self?.stop() } else { self?.configure() }
+                }
+            })
+        }
+    }
+    var onLevel: ((Double) -> Void)?
+    func configure() {
+        guard !locked else { return }
+        guard UserDefaults.standard.bool(forKey: "replaceVolumeHUD") else { stop(); status = "System volume popup enabled."; return }
+        guard tap == nil else { return }
+        guard AXIsProcessTrusted() else { status = "Allow Accessibility access, then click Retry."; return }
+        tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+            eventsOfInterest: CGEventMask(1) << 14, callback: { _, type, event, context in
+                guard let context else { return Unmanaged.passUnretained(event) }
+                return MainActor.assumeIsolated {
+                    let owner = Unmanaged<NotchVolumeKeys>.fromOpaque(context).takeUnretainedValue()
+                    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                        if let tap = owner.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+                        return Unmanaged.passUnretained(event)
+                    }
+                    return owner.handle(event) ? nil : Unmanaged.passUnretained(event)
+                }
+            }, userInfo: Unmanaged.passUnretained(self).toOpaque())
+        guard let tap else { status = "Could not access volume keys. Check Accessibility permission and retry."; return }
+        source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        status = "Undertone handles volume keys on supported outputs."
+    }
+    func requestPermission() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        configure()
+    }
+    func stop() {
+        if let tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        source = nil; tap = nil; consumed.removeAll()
+    }
+    private func handle(_ event: CGEvent) -> Bool {
+        guard let key = NSEvent(cgEvent: event), key.type == .systemDefined, key.subtype.rawValue == 8 else { return false }
+        let code = Int((key.data1 >> 16) & 0xffff)
+        guard [0, 1, 7].contains(code) else { return false }
+        let down = ((key.data1 >> 8) & 0xff) == 0x0a
+        if !down { return consumed.remove(code) != nil }
+        // Preserve macOS alternate key actions such as opening Sound settings.
+        guard !key.modifierFlags.contains(.option), !key.modifierFlags.contains(.command), !key.modifierFlags.contains(.control) else { return false }
+        device.refresh()
+        guard device.volumeAvailable else { return false }
+        let old = device.volume
+        if code == 7 {
+            let mute = old > 0
+            if mute { restoreVolume = old }
+            guard device.setMuted(mute) else { return false }
+            if !mute { device.changeVolume(restoreVolume) }
+        } else {
+            _ = device.setMuted(false)
+            let step = key.modifierFlags.contains(.shift) ? 1.0 / 64 : 1.0 / 16
+            device.changeVolume(min(1, max(0, old + (code == 0 ? step : -step))))
+            guard device.message == nil else { return false }
+        }
+        device.refresh(); onLevel?(device.volume); consumed.insert(code)
+        return true
+    }
+}
+
+struct VolumeHUDSettings: View {
+    @AppStorage("replaceVolumeHUD") private var enabled = false
+    @ObservedObject private var keys = NotchVolumeKeys.shared
+    var body: some View {
+        Toggle("Replace macOS volume popup", isOn: $enabled).onChange(of: enabled) { _ in keys.configure() }
+        if enabled {
+            Text(keys.status).font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Allow Accessibility…") { keys.requestPermission() }
+                Button("Retry") { keys.configure() }
+            }
+        }
     }
 }

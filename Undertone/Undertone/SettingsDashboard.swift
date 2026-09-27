@@ -46,6 +46,7 @@ struct SettingsDashboard: View {
                 Toggle("Keep player expanded", isOn: $state.pinned)
                 Toggle("Reverse swipe direction", isOn: $state.reverseSwipes)
             }
+            Section("Volume indicator") { VolumeHUDSettings() }
             Section("Sleep timer") { SleepTimerSettings(timer: spotify.sleepTimer) { spotify.pause() } }
             Section("Updates") { UpdateSettings() }
             Section("Spotify") {
@@ -94,7 +95,15 @@ struct SettingsDashboard: View {
     private var appearance: some View {
         Form {
             Section("Notch") {
-                Toggle("Always show notch", isOn: $state.alwaysShowNotch)
+                Picker("Display style", selection: $state.dynamicIsland) {
+                    Text("Notch").tag(false)
+                    Text("Dynamic Island").tag(true)
+                }.pickerStyle(.segmented)
+                if state.dynamicIsland {
+                    LabeledContent("Distance below menu bar", value: "\(Int(state.islandGap)) pt")
+                    Slider(value: $state.islandGap, in: 8...80, step: 1).accessibilityLabel("Dynamic Island vertical position")
+                }
+                Toggle("Always show notch or island", isOn: $state.alwaysShowNotch)
                 Text("Keep a black notch visible while idle, including on Macs without a camera notch.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Artwork colour accents", isOn: $artworkAccent)
                 Toggle("Thin white outline", isOn: $state.whiteOutline)

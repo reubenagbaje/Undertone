@@ -107,3 +107,13 @@ struct SleepSchedule {
         return true
     }
 }
+
+/// Downloads are explicit HTTPS transfers, without credentials embedded in links.
+enum ActivityDownloadURL {
+    static func parse(_ input: String) -> URL? {
+        guard let url = URL(string: input.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme?.lowercased() == "https", let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil else { return nil }
+        return url
+    }
+}

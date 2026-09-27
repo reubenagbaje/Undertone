@@ -163,6 +163,7 @@ final class LockMediaPanel: NSPanel {
         observe(.default, NSApplication.didChangeScreenParametersNotification) { controller in
             controller.hide(); controller.reconcile()
         }
+        observe(.default, .init("UndertonePresentationChanged")) { $0.reconcile() }
         observe(.default, UserDefaults.didChangeNotification) { $0.reconcile() }
         spotify.$playing.combineLatest(spotify.$connected).receive(on: RunLoop.main).sink { [weak self] playing, connected in
             guard let self else { return }
@@ -210,7 +211,7 @@ final class LockMediaPanel: NSPanel {
         if asleep { hide() } else { reconcile() }
     }
     private func reconcile() {
-        policy.enabled = UserDefaults.standard.bool(forKey: "enableLockScreenPlayer")
+        policy.enabled = UserDefaults.standard.bool(forKey: "enableLockScreenPlayer") && !IslandModules.shared.presentation
         if policy.shouldPresent && !dismissedForCurrentLock { show() }
         else if !visual.shrinking { hide() }
     }

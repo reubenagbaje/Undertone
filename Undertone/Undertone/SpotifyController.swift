@@ -2,6 +2,20 @@ import AppKit
 import Combine
 
 @MainActor final class SpotifyController: ObservableObject {
+    @Published var playerSource = UserDefaults.standard.string(forKey: "playerSource") ?? "Spotify" {
+        didSet {
+            UserDefaults.standard.set(playerSource, forKey: "playerSource")
+            connectionGeneration = UUID(); artworkTask?.cancel(); artworkURL = ""; artwork = nil
+            trackID = ""; connected = false; playing = false; title = "Connecting…"; artist = playerSource
+            library.syncTrack(""); library.syncMetadata(""); retry.reset(); enabled = true
+            refresh()
+        }
+    }
+    var browserSource: Bool { playerSource == "Safari" || playerSource == "Chrome" }
+    var sourceBundle: String {
+        switch playerSource { case "Apple Music": return "com.apple.Music"; case "Safari": return "com.apple.Safari"; case "Chrome": return "com.google.Chrome"; default: return "com.spotify.client" }
+    }
+    var supportsSkipping: Bool { !browserSource }
     @Published var title = "Your next favourite song"
     @Published var artist = "Connect Spotify to get started"
     @Published var album = ""
@@ -58,10 +72,10 @@ import Combine
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                      app.bundleIdentifier == "com.spotify.client" else { return }
+                guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                let bundle = app.bundleIdentifier
                 Task { @MainActor in
-                    guard let self, !self.retry.permissionDenied else { return }
+                    guard let self, bundle == self.sourceBundle, !self.retry.permissionDenied else { return }
                     self.retry.reset(); self.enabled = true; self.refresh()
                 }
             })
@@ -90,18 +104,21 @@ import Combine
     }
 
     func openSpotify() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client") else {
-            error = "Install the Spotify desktop app first."
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: sourceBundle) else {
+            error = "Install \(playerSource) first."
             return
         }
         NSWorkspace.shared.openApplication(at: url, configuration: .init()) { _, _ in }
     }
 
     private func run(_ body: String, completion: @escaping @MainActor (NSAppleEventDescriptor?, String?) -> Void) {
+        if browserSource { runBrowser(body, completion: completion); return }
+        let bundle = sourceBundle
+        let body = playerSource == "Apple Music" ? body.replacingOccurrences(of: "shuffling", with: "shuffle enabled") : body
         queue.async {
             autoreleasepool {
                 var error: NSDictionary?
-                let script = NSAppleScript(source: "with timeout of 3 seconds\ntell application id \"com.spotify.client\"\n\(body)\nend tell\nend timeout")
+                let script = NSAppleScript(source: "with timeout of 3 seconds\ntell application id \"\(bundle)\"\n\(body)\nend tell\nend timeout")
                 let result = script?.executeAndReturnError(&error)
                 let message = error?[NSAppleScript.errorMessage] as? String
                 let code = error?[NSAppleScript.errorNumber] as? Int
@@ -112,9 +129,9 @@ import Combine
 
     func refresh() {
         guard enabled, !polling, !suspended, retry.allowsAttempt(at: ProcessInfo.processInfo.systemUptime) else { return }
-        guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client").isEmpty else {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: sourceBundle).isEmpty else {
             connected = false; playing = false; position = 0; duration = 0
-            title = "Spotify is closed"; artist = "Open Spotify to choose some music"; album = ""
+            title = "\(playerSource) is closed"; artist = "Open \(playerSource) to choose some music"; album = ""
             artworkTask?.cancel(); artwork = nil; artworkURL = ""
             library.syncTrack("")
             library.syncMetadata("")
@@ -124,15 +141,23 @@ import Combine
         let generation = connectionGeneration
         let seekRevision = seekState.revision
         let seekWasPending = seekState.pending
-        run("""
+        let snapshot = playerSource == "Apple Music" ? """
+        set t to current track
+        set cover to ""
+        try
+            set cover to raw data of artwork 1 of t
+        end try
+        return {name of t, artist of t, album of t, cover, duration of t, player position, player state as text, shuffle enabled, persistent ID of t, sound volume}
+        """ : """
         set t to current track
         return {name of t, artist of t, album of t, artwork url of t, duration of t, player position, player state as text, shuffling, id of t, sound volume}
-        """) { [weak self] result, message in
+        """
+        run(snapshot) { [weak self] result, message in
             guard let self else { return }
             self.polling = false
             guard self.connectionGeneration == generation, !self.suspended else { return }
             if let message {
-                self.error = "Spotify: \(message) If access was denied, enable Undertone under Privacy & Security → Automation, then reconnect."
+                self.error = "\(self.playerSource): \(message) If access was denied, enable Undertone under Privacy & Security → Automation, then reconnect."
                 self.connected = false; self.playing = false
                 self.retry.failed(code: self.lastScriptErrorCode, now: ProcessInfo.processInfo.systemUptime)
                 // Only a denied Automation request needs explicit user recovery.
@@ -149,7 +174,7 @@ import Combine
             self.artist = result.atIndex(2)?.stringValue ?? "Unknown artist"
             self.album = result.atIndex(3)?.stringValue ?? ""
             // Spotify's desktop Apple Event returns milliseconds despite its sdef description.
-            self.duration = max(0, (result.atIndex(5)?.doubleValue ?? 0) / 1000)
+            self.duration = max(0, (result.atIndex(5)?.doubleValue ?? 0) / (self.playerSource == "Spotify" ? 1000 : 1))
             if self.seekState.accepts(revision: seekRevision, pendingAtStart: seekWasPending) {
                 self.position = min(self.duration, max(0, result.atIndex(6)?.doubleValue ?? 0))
             }
@@ -159,15 +184,21 @@ import Combine
             let changedTrack = !self.trackID.isEmpty && !nextTrackID.isEmpty && self.trackID != nextTrackID
             self.trackID = nextTrackID
             if changedTrack { self.trackRevision += 1 }
-            self.library.syncTrack(self.trackID)
-            self.library.syncMetadata(self.trackID)
-            self.loadArtwork(result.atIndex(4)?.stringValue ?? "")
+            self.library.syncTrack(self.playerSource == "Spotify" ? self.trackID : "")
+            self.library.syncMetadata(self.playerSource == "Spotify" ? self.trackID : "")
+            if self.playerSource == "Apple Music" {
+                if self.artwork == nil || changedTrack {
+                    self.artwork = result.atIndex(4).flatMap { NSImage(data: $0.data) }
+                    self.artworkRevision = UUID()
+                }
+            } else { self.loadArtwork(result.atIndex(4)?.stringValue ?? "") }
         }
     }
 
     enum Command: String { case previous = "previous track", toggle = "playpause", next = "next track" }
     func command(_ command: Command) {
         guard connected else { return }
+        guard supportsSkipping || command == .toggle else { return }
         if command == .next { animateSkip(direction: 1, symbol: "forward.end.fill") }
         if command == .previous { animateSkip(direction: -1, symbol: "backward.end.fill") }
         run(command.rawValue) { [weak self] _, message in
@@ -209,16 +240,54 @@ import Combine
         run("pause") { [weak self] _, message in self?.error = message; self?.refresh() }
     }
     func playURI(_ raw: String) {
-        guard connected, let uri = SpotifyOAuth.trackURI(raw) else { return }
+        guard playerSource == "Spotify", connected, let uri = SpotifyOAuth.trackURI(raw) else { return }
         run("play track \"\(uri)\"") { [weak self] _, message in self?.error = message; self?.refresh() }
     }
     func toggleShuffle() {
-        guard connected else { return }
+        guard !browserSource, connected else { return }
         run("set shuffling to " + (shuffling ? "false" : "true")) { [weak self] _, message in
             self?.error = message
             self?.refresh()
         }
     }
+    private func runBrowser(_ body: String, completion: @escaping @MainActor (NSAppleEventDescriptor?, String?) -> Void) {
+        let source = playerSource
+        let command: String
+        if body == "playpause" { command = "if(m.paused){m.play().catch(()=>{});}else{m.pause();}" }
+        else if body == "pause" { command = "m.pause();" }
+        else if body.hasPrefix("set player position to "), let n = Double(body.replacingOccurrences(of: "set player position to ", with: "")), n.isFinite { command = "m.currentTime=\(max(0,n));" }
+        else if body.hasPrefix("set sound volume to "), let n = Double(body.replacingOccurrences(of: "set sound volume to ", with: "")), n.isFinite { command = "m.volume=\(min(1,max(0,n/100)));" }
+        else { command = "" }
+        let js = """
+        (()=>{let all=[...document.querySelectorAll('audio,video')];let m=all.find(x=>!x.paused)||all[0];if(!m)return '';\(command)let d=navigator.mediaSession?.metadata;return JSON.stringify({title:d?.title||document.title,artist:d?.artist||location.hostname,album:d?.album||'',art:d?.artwork?.slice(-1)[0]?.src||'',duration:Number.isFinite(m.duration)?m.duration:0,position:m.currentTime||0,playing:!m.paused,id:m.currentSrc||location.href,volume:m.volume*100});})()
+        """
+        let quoted = "\"" + js.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        let script = source == "Safari" ? "tell application id \"com.apple.Safari\" to do JavaScript \(quoted) in current tab of front window" : "tell application id \"com.google.Chrome\" to execute active tab of front window javascript \(quoted)"
+        queue.async {
+            var error: NSDictionary?
+            let result = NSAppleScript(source: "with timeout of 3 seconds\n" + script + "\nend timeout")?.executeAndReturnError(&error)
+            let errorMessage = error?[NSAppleScript.errorMessage] as? String
+            let code = error?[NSAppleScript.errorNumber] as? Int
+            let data = result?.stringValue?.data(using: .utf8)
+            let object = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            DispatchQueue.main.async {
+                self.lastScriptErrorCode = code
+                guard let object else { completion(nil, errorMessage ?? "No accessible audio/video in the active tab. Enable JavaScript from Apple Events in the browser’s developer menu."); return }
+                let list = NSAppleEventDescriptor.list()
+                let strings = [1: "title", 2: "artist", 3: "album", 4: "art", 9: "id"]
+                for i in 1...10 {
+                    let value: NSAppleEventDescriptor
+                    if let key = strings[i] { value = NSAppleEventDescriptor(string: object[key] as? String ?? "") }
+                    else if i == 7 { value = NSAppleEventDescriptor(string: object["playing"] as? Bool == true ? "playing" : "paused") }
+                    else if i == 8 { value = NSAppleEventDescriptor(boolean: false) }
+                    else { value = NSAppleEventDescriptor(double: (object[i == 5 ? "duration" : i == 6 ? "position" : "volume"] as? NSNumber)?.doubleValue ?? 0) }
+                    list.insert(value, at: i)
+                }
+                completion(list, nil)
+            }
+        }
+    }
+
     private static func artworkPalette(_ image: NSImage?) -> [NSColor] {
         guard let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [.darkGray, .black] }
         let bitmap = NSBitmapImageRep(cgImage: cg)

@@ -1,14 +1,20 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 enum IslandMotion {
-    static let swipeReturn = Animation.interactiveSpring(response: 0.34, dampingFraction: 0.8, blendDuration: 0.12)
-    static let finger = Animation.interactiveSpring(response: 0.12, dampingFraction: 0.86, blendDuration: 0.08)
-    static let morph = Animation.interactiveSpring(response: 0.4, dampingFraction: 0.86, blendDuration: 0.16)
-    static let retract = Animation.interactiveSpring(response: 0.32, dampingFraction: 0.92, blendDuration: 0.14)
-    static let preview = Animation.interactiveSpring(response: 0.36, dampingFraction: 0.88, blendDuration: 0.14)
-    static let hover = Animation.interactiveSpring(response: 0.28, dampingFraction: 0.86, blendDuration: 0.14)
-    static let cover = Animation.interactiveSpring(response: 0.36, dampingFraction: 0.84, blendDuration: 0.14)
+    static var strength: Double { min(1.5, max(0, UserDefaults.standard.object(forKey: "animationIntensity") as? Double ?? 1)) }
+    static func spring(_ response: Double, _ damping: Double, _ blend: Double) -> Animation {
+        if strength == 0 { return .linear(duration: 0.01) }
+        return .interactiveSpring(response: response * (0.8 + strength * 0.2), dampingFraction: min(1, damping + (1 - strength) * 0.15), blendDuration: blend)
+    }
+    static var swipeReturn: Animation { spring(0.34, 0.8, 0.12) }
+    static var finger: Animation { spring(0.12, 0.86, 0.08) }
+    static var morph: Animation { spring(0.4, 0.86, 0.16) }
+    static var retract: Animation { spring(0.32, 0.92, 0.14) }
+    static var preview: Animation { spring(0.36, 0.88, 0.14) }
+    static var hover: Animation { spring(0.28, 0.86, 0.14) }
+    static var cover: Animation { spring(0.36, 0.84, 0.14) }
 }
 
 @main struct UndertoneApp: App {
@@ -19,6 +25,7 @@ enum IslandMotion {
                 CommandMenu("Player") {
                     Button("Show Player") { delegate.showPlayer() }.keyboardShortcut("o")
                     Button("Collapse Player") { delegate.collapsePlayer() }
+                    Button("Toggle Presentation Mode") { IslandModules.shared.presentation.toggle() }.keyboardShortcut("p", modifiers: [.command, .option])
                 }
             }
     }
@@ -36,10 +43,19 @@ final class IslandPanel: NSPanel {
         didSet { UserDefaults.standard.set(dynamicIsland, forKey: "dynamicIsland") }
     }
     @Published var islandGap = min(80, max(8, UserDefaults.standard.object(forKey: "islandGap") as? Double ?? 12)) {
-        didSet { UserDefaults.standard.set(islandGap, forKey: "islandGap") }
+        didSet { UserDefaults.standard.set(islandGap, forKey: "islandGap"); UserDefaults.standard.set(islandGap, forKey: "islandGap." + selectedDisplay) }
     }
     @Published var alwaysShowNotch = UserDefaults.standard.bool(forKey: "alwaysShowNotch") {
         didSet { UserDefaults.standard.set(alwaysShowNotch, forKey: "alwaysShowNotch") }
+    }
+    @Published var toolsOpen = false
+    @Published var moduleNotice: String?
+    @Published var moduleSymbol = "timer"
+    @Published var selectedDisplay = UserDefaults.standard.string(forKey: "selectedDisplay") ?? "auto" {
+        didSet { UserDefaults.standard.set(selectedDisplay, forKey: "selectedDisplay") }
+    }
+    @Published var appearancePreset = UserDefaults.standard.string(forKey: "appearancePreset") ?? "Compact" {
+        didSet { UserDefaults.standard.set(appearancePreset, forKey: "appearancePreset") }
     }
     @Published var queueOpen = false
     @Published var levelKind: String?
@@ -72,17 +88,17 @@ final class IslandPanel: NSPanel {
     @Published var reverseSwipes = UserDefaults.standard.bool(forKey: "reverseSwipes") {
         didSet { UserDefaults.standard.set(reverseSwipes, forKey: "reverseSwipes") }
     }
-    var dormant: Bool { !playbackActive && !previewing && !expanded && trackNotice == nil && levelKind == nil }
+    var dormant: Bool { !playbackActive && !previewing && !expanded && trackNotice == nil && levelKind == nil && moduleNotice == nil }
     var wingWidth: CGFloat { trackNotice != nil ? 44 : (previewing || swipeEngaged) ? 46 : 34 }
     var swipeVisual: SwipePresentation { SwipePresentation(progress: Double(swipeProgress), reversed: reverseSwipes) }
     var swipeExtension: CGFloat { expanded ? 0 : CGFloat(swipeVisual.extensionWidth) }
     var shellOffset: CGFloat { CGFloat(swipeVisual.forward ? 1 : -1) * swipeExtension / 2 }
-    var shoulder: CGFloat { dynamicIsland ? 0 : expanded ? 19 : levelKind != nil ? max(12, CGFloat(idleCornerCurve)) : CGFloat(idleCornerCurve) }
-    var bottomCornerRadius: CGFloat { expanded ? 50 : levelKind != nil ? 28 : trackNotice == nil ? 17 : 24 }
+    var shoulder: CGFloat { dynamicIsland ? 0 : expanded ? 19 : (levelKind != nil || moduleNotice != nil) ? max(12, CGFloat(idleCornerCurve)) : CGFloat(idleCornerCurve) }
+    var bottomCornerRadius: CGFloat { expanded ? 50 : (levelKind != nil || moduleNotice != nil) ? 28 : trackNotice == nil ? 17 : 24 }
     var compactWidth: CGFloat { notchWidth + wingWidth * 2 + shoulder * 2 + (dynamicIsland ? 20 : 0) }
     var compactHeight: CGFloat { notchHeight + (previewing || swipeEngaged || trackNotice != nil ? 2 : 1) }
-    var visibleWidth: CGFloat { expanded ? expandedWidth : levelKind != nil ? max(280, notchWidth + 32) : dormant ? notchWidth : compactWidth + swipeExtension }
-    var visibleHeight: CGFloat { expanded ? expandedHeight + notchHeight + (queueOpen ? 280 : 0) + (levelKind == nil ? 0 : 76) : levelKind != nil ? notchHeight + 72 : dormant ? notchHeight : compactHeight + (trackNotice == nil ? 0 : 36) }
+    var visibleWidth: CGFloat { expanded ? expandedWidth : (levelKind != nil || moduleNotice != nil) ? max(280, notchWidth + 32) : dormant ? notchWidth : compactWidth + swipeExtension }
+    var visibleHeight: CGFloat { expanded ? expandedHeight + notchHeight + ((queueOpen || toolsOpen) ? 280 : 0) + (levelKind == nil ? 0 : 76) : levelKind != nil ? notchHeight + 72 : moduleNotice != nil ? notchHeight + 44 : dormant ? notchHeight : compactHeight + (trackNotice == nil ? 0 : 36) }
     func open() {
         guard !expanded else { return }
         if haptics {
@@ -93,6 +109,7 @@ final class IslandPanel: NSPanel {
     func close() {
         pinned = false
         queueOpen = false
+        toolsOpen = false
         withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : IslandMotion.retract) { expanded = false }
     }
 }
@@ -112,6 +129,8 @@ final class IslandPanel: NSPanel {
     private var previousVolume: Double?
     private var previousBrightness: Double?
     private var previousDisplay = ""
+    private var lastDisplay = ""
+    private var lastPreset = ""
     private var lastIslandStyle = false
     private var lastIslandGap: Double = -1
     private var shortcutObserver: NSObjectProtocol?
@@ -140,17 +159,19 @@ final class IslandPanel: NSPanel {
             case 2: self.spotify.command(.toggle)
             case 3: self.spotify.command(.next)
             case 4: self.spotify.restartOrPrevious()
-            case 5: Task { await self.spotify.library.toggleCurrent() }
+            case 5: if self.spotify.playerSource == "Spotify" { Task { await self.spotify.library.toggleCurrent() } }
             case 6:
                 let defaults = UserDefaults.standard
                 defaults.set(!defaults.bool(forKey: "enableLockScreenPlayer"), forKey: "enableLockScreenPlayer")
+            case 7: IslandModules.shared.presentation.toggle()
             default: break
             }
         }
+        IslandModules.shared.start()
         _ = AppUpdates.shared
-        NotchVolumeKeys.shared.onLevel = { [weak self] value in
+        NotchVolumeKeys.shared.onLevel = { [weak self] kind, value in
             guard let self else { return }
-            self.state.levelKind = "Volume"; self.state.levelValue = value
+            self.state.levelKind = kind; self.state.levelValue = value
             self.levelDeadline = ProcessInfo.processInfo.systemUptime + 1.6
         }
         NotchVolumeKeys.shared.configure()
@@ -186,6 +207,7 @@ final class IslandPanel: NSPanel {
             guard let self else { return }
             self.timer?.fireDate = asleep ? .distantFuture : Date()
             self.audio.setDisplaySleeping(asleep)
+            IslandModules.shared.setSleeping(asleep)
             self.previousVolume = nil; self.previousBrightness = nil
             self.state.levelKind = nil
         }
@@ -197,13 +219,18 @@ final class IslandPanel: NSPanel {
         }
     }
 
-    func showPlayer() { state.pinned = true; state.open() }
+    func showPlayer() { IslandModules.shared.presentation = false; state.pinned = true; state.open() }
     func collapsePlayer() { state.close() }
     func showSettings() { state.settingsOpen = true }
 
     private func position() {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.screens.first,
+        guard let screen = NSScreen.screens.first(where: { $0.undertoneID == state.selectedDisplay }) ?? NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.screens.first,
               let panel else { return }
+        if lastDisplay != state.selectedDisplay {
+            lastDisplay = state.selectedDisplay
+            state.islandGap = min(80, max(8, UserDefaults.standard.object(forKey: "islandGap." + state.selectedDisplay) as? Double ?? 12))
+        }
+        lastPreset = state.appearancePreset
         let inset = screen.safeAreaInsets.top
         lastIslandStyle = state.dynamicIsland
         lastIslandGap = state.islandGap
@@ -221,7 +248,8 @@ final class IslandPanel: NSPanel {
             state.notchHeight = 30
             anchor = CGPoint(x: screen.frame.midX, y: screen.frame.maxY)
         }
-        state.expandedWidth = max(398, state.notchWidth + 208)
+        let preferredWidth: CGFloat = state.appearancePreset == "Comfortable" ? 438 : state.appearancePreset == "Minimal" ? 350 : 398
+        state.expandedWidth = max(preferredWidth, state.notchWidth + 208)
         state.expandedHeight = (state.expandedWidth - 38) / 360 * 189 - state.notchHeight
         let size = CGSize(width: state.expandedWidth + 40, height: state.expandedHeight + state.notchHeight + 48 + 356)
         panel.setFrame(NSRect(x: anchor.x - size.width / 2, y: anchor.y - size.height, width: size.width, height: size.height + (state.dynamicIsland ? 12 : 0)), display: true)
@@ -229,7 +257,13 @@ final class IslandPanel: NSPanel {
 
     private func updatePointer() {
         guard let panel else { return }
-        if state.dynamicIsland != lastIslandStyle || state.islandGap != lastIslandGap { position() }
+        if state.dynamicIsland != lastIslandStyle || state.islandGap != lastIslandGap || state.selectedDisplay != lastDisplay || state.appearancePreset != lastPreset { position() }
+        if IslandModules.shared.presentation {
+            panel.orderOut(nil); return
+        } else if !panel.isVisible { panel.orderFrontRegardless() }
+        if spotify.playerSource != "Spotify" { state.queueOpen = false }
+        state.moduleNotice = IslandModules.shared.activity
+        state.moduleSymbol = IslandModules.shared.activitySymbol
         state.playbackActive = spotify.connected && spotify.playing
         let now = ProcessInfo.processInfo.systemUptime
         // Read actual levels after macOS handles media keys; no keyboard interception.
@@ -291,7 +325,7 @@ final class IslandPanel: NSPanel {
     }
 
     private func handleScroll(_ event: NSEvent) -> NSEvent? {
-        guard event.window === panel, !state.settingsOpen, !state.queueOpen, event.hasPreciseScrollingDeltas else { return event }
+        guard event.window === panel, !state.settingsOpen, !state.queueOpen, !state.toolsOpen, event.hasPreciseScrollingDeltas else { return event }
         let now = ProcessInfo.processInfo.systemUptime
         // Filter out scrolls on the transparent canvas and on settings popovers.
         let width = state.visibleWidth
@@ -354,6 +388,7 @@ final class IslandPanel: NSPanel {
 
     func applicationWillTerminate(_ notification: Notification) {
         NotchVolumeKeys.shared.stop()
+        IslandModules.shared.stop()
         shortcuts.stop()
         if let shortcutObserver { NotificationCenter.default.removeObserver(shortcutObserver) }
         swipeSettleTask?.cancel()
@@ -419,8 +454,11 @@ struct IslandView: View {
                 if !state.expanded, let kind = state.levelKind {
                     Color.clear.frame(height: state.notchHeight)
                     NotchLevelView(kind: kind, value: state.levelValue, expanded: false).frame(height: 72)
+                } else if !state.expanded, let notice = state.moduleNotice {
+                    Color.clear.frame(height: state.notchHeight)
+                    Label(notice, systemImage: state.moduleSymbol).font(.system(size: 12, weight: .semibold)).lineLimit(1).padding(.horizontal, 28).frame(height: 44)
                 } else if state.expanded {
-                    PlayerView(spotify: spotify, audio: audio, openLibrarySettings: { state.settingsOpen = true }, queueAction: { withAnimation(reduceMotion ? nil : IslandMotion.morph) { state.queueOpen.toggle() } }, queueActive: state.queueOpen)
+                    PlayerView(spotify: spotify, audio: audio, openLibrarySettings: { state.settingsOpen = true }, queueAction: { withAnimation(reduceMotion ? nil : IslandMotion.morph) { state.toolsOpen = false; state.queueOpen.toggle() } }, queueActive: state.queueOpen, toolsAction: { withAnimation(reduceMotion ? nil : IslandMotion.morph) { state.queueOpen = false; state.toolsOpen.toggle() } })
                         .frame(height: state.expandedHeight + state.notchHeight, alignment: .top)
                         .overlay(alignment: .topTrailing) {
                             Button { state.settingsOpen = true } label: {
@@ -437,6 +475,7 @@ struct IslandView: View {
                         .contextMenu { Button("Settings…") { state.settingsOpen = true } }
                         .transition(.opacity)
                     if let kind = state.levelKind { NotchLevelView(kind: kind, value: state.levelValue, expanded: true).frame(height: 76) }
+                    if state.toolsOpen { IslandToolsView().frame(height: 280).transition(.opacity) }
                     if state.queueOpen {
                         NotchQueueView(spotify: spotify, library: spotify.library)
                             .frame(height: 280).transition(.opacity.combined(with: .move(edge: .top)))
@@ -521,6 +560,11 @@ struct IslandView: View {
                         .padding(0.375).allowsHitTesting(false)
                 }
             }
+            .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
+                guard !IslandModules.shared.presentation else { return false }
+                state.queueOpen = false; state.toolsOpen = true; state.open()
+                return IslandModules.shared.accept(providers)
+            }
             .offset(x: state.shellOffset)
             .opacity(state.dormant && !state.alwaysShowNotch ? 0 : 1)
             .shadow(color: .black.opacity(state.expanded ? 0.32 : 0.22), radius: state.expanded ? 14 : 5, y: state.expanded ? 7 : 3)
@@ -528,6 +572,8 @@ struct IslandView: View {
             .animation(reduceMotion ? nil : IslandMotion.hover, value: state.swipeEngaged)
             .animation(reduceMotion ? nil : state.expanded ? IslandMotion.morph : IslandMotion.retract, value: state.expanded)
             .animation(reduceMotion ? nil : IslandMotion.morph, value: state.queueOpen)
+            .animation(reduceMotion ? nil : IslandMotion.morph, value: state.toolsOpen)
+            .animation(reduceMotion ? nil : IslandMotion.preview, value: state.moduleNotice)
             .animation(reduceMotion ? nil : IslandMotion.morph, value: state.levelKind)
             .animation(reduceMotion ? nil : IslandMotion.hover, value: state.previewing)
             .animation(reduceMotion ? nil : IslandMotion.hover, value: state.idleCornerCurve)
@@ -762,6 +808,7 @@ struct PlayerView: View {
     let openLibrarySettings: () -> Void
     var queueAction: (() -> Void)? = nil
     var queueActive = false
+    var toolsAction: (() -> Void)? = nil
     var artworkAction: (() -> Void)? = nil
     var locked = false
     var hideArtwork = false
@@ -774,6 +821,9 @@ struct PlayerView: View {
         GeometryReader { geometry in
             let scale = (geometry.size.width - 38) / 360
             ZStack(alignment: .topLeading) {
+                if let toolsAction {
+                    Button(action: toolsAction) { Image(systemName: "square.grid.2x2").font(.system(size: 11, weight: .semibold)).frame(width: 28, height: 20) }.buttonStyle(SpringControlStyle()).accessibilityLabel("Activities, files and audio outputs").offset(x: 274, y: 9)
+                }
                 if !hideArtwork {
                 AnimatedCover(spotify: spotify)
                     .frame(width: 64, height: 64)
@@ -785,7 +835,7 @@ struct PlayerView: View {
                     if spotify.connected {
                         TrackHeading(title: spotify.title, artist: spotify.artist, library: spotify.library)
                     } else {
-                        Button("Connect Spotify") { spotify.openSpotify(); spotify.connect() }
+                        Button("Connect \(spotify.playerSource)") { spotify.openSpotify(); spotify.connect() }
                             .font(.system(size: 14, weight: .bold)).buttonStyle(.plain)
                         Text("Choose a song to begin").font(.system(size: 11)).foregroundStyle(.gray)
                     }
@@ -797,26 +847,26 @@ struct PlayerView: View {
                         .frame(width: 18, height: 18).frame(width: 30, height: 30)
                 }
                 .buttonStyle(SpringControlStyle()).disabled(audio.busy || locked)
-                .help(audio.running ? "Live Spotify audio" : "Enable reactive waveform")
-                .accessibilityLabel(audio.running ? "Live Spotify audio waveform" : "Enable reactive waveform")
+                .help(audio.running ? "Live selected-player audio" : "Enable reactive waveform")
+                .accessibilityLabel(audio.running ? "Live selected-player audio waveform" : "Enable reactive waveform")
                 .offset(x: 303, y: 34)
                 progress.frame(width: 312, height: 20).offset(x: 24, y: 93)
                 SpotifyHeart(library: spotify.library, playbackConnected: spotify.connected, openSettings: openLibrarySettings)
                     .position(x: queueAction == nil ? 77 : 46, y: 148)
-                    .disabled(locked && (!spotify.library.connected || spotify.library.error != nil))
-                if let queueAction {
+                    .disabled(spotify.playerSource != "Spotify" || (locked && (!spotify.library.connected || spotify.library.error != nil)))
+                if let queueAction, spotify.playerSource == "Spotify" {
                     Button(action: queueAction) { Image(systemName: "list.bullet").font(.system(size: 17, weight: .semibold)).frame(width: 30, height: 36) }
                         .buttonStyle(SpringControlStyle()).foregroundStyle(queueActive ? .white : Color(white: 0.48))
                         .accessibilityLabel(queueActive ? "Close song queue" : "Open song queue").position(x: 84, y: 148)
                 }
                 control("backward.fill", label: "Previous track", size: 22) { spotify.command(.previous) }
-                    .position(x: 126, y: 148)
+                    .position(x: 126, y: 148).disabled(!spotify.supportsSkipping)
                 control(spotify.playing ? "pause.fill" : "play.fill", label: spotify.playing ? "Pause" : "Play", size: 27) { spotify.command(.toggle) }
                     .position(x: 180, y: 148)
                 control("forward.fill", label: "Next track", size: 22) { spotify.command(.next) }
-                    .position(x: 234, y: 148)
+                    .position(x: 234, y: 148).disabled(!spotify.supportsSkipping)
                 control("shuffle", label: "Toggle shuffle", size: 20, muted: !spotify.shuffling) { spotify.toggleShuffle() }
-                    .position(x: 283, y: 148)
+                    .position(x: 283, y: 148).disabled(spotify.browserSource)
             }
             .frame(width: 360, height: 189, alignment: .topLeading)
             .scaleEffect(scale, anchor: .topLeading)

@@ -136,7 +136,7 @@ import Sparkle
             MainActor.assumeIsolated { owner.action?(id.id) }
             return noErr
         }, 1, &type, Unmanaged.passUnretained(self).toOpaque(), &handler)
-        for (id, key) in [(1, kVK_ANSI_U), (2, kVK_Space), (3, kVK_RightArrow), (4, kVK_LeftArrow), (5, kVK_ANSI_L), (6, kVK_ANSI_K)] {
+        for (id, key) in [(1, kVK_ANSI_U), (2, kVK_Space), (3, kVK_RightArrow), (4, kVK_LeftArrow), (5, kVK_ANSI_L), (6, kVK_ANSI_K), (7, kVK_ANSI_P)] {
             var ref: EventHotKeyRef?
             if RegisterEventHotKey(UInt32(key), UInt32(cmdKey | optionKey), EventHotKeyID(signature: 0x554E4452, id: UInt32(id)), GetApplicationEventTarget(), 0, &ref) == noErr, let ref { keys.append(ref) }
         }
@@ -273,10 +273,10 @@ struct UpdateSettings: View {
             })
         }
     }
-    var onLevel: ((Double) -> Void)?
+    var onLevel: ((String, Double) -> Void)?
     func configure() {
         guard !locked else { return }
-        guard UserDefaults.standard.bool(forKey: "replaceVolumeHUD") else { stop(); status = "System volume popup enabled."; return }
+        guard UserDefaults.standard.bool(forKey: "replaceVolumeHUD") || UserDefaults.standard.bool(forKey: "replaceBrightnessHUD") else { stop(); status = "System volume popup enabled."; return }
         guard tap == nil else { return }
         guard AXIsProcessTrusted() else { status = "Allow Accessibility access, then click Retry."; return }
         tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -295,7 +295,7 @@ struct UpdateSettings: View {
         source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        status = "Undertone handles volume keys on supported outputs."
+        status = "Undertone handles enabled volume and brightness keys on supported devices."
     }
     func requestPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -310,13 +310,20 @@ struct UpdateSettings: View {
     private func handle(_ event: CGEvent) -> Bool {
         guard let key = NSEvent(cgEvent: event), key.type == .systemDefined, key.subtype.rawValue == 8 else { return false }
         let code = Int((key.data1 >> 16) & 0xffff)
-        guard [0, 1, 7].contains(code) else { return false }
+        guard [0, 1, 7, 2, 3].contains(code) else { return false }
         let down = ((key.data1 >> 8) & 0xff) == 0x0a
         if !down { return consumed.remove(code) != nil }
         // Preserve macOS alternate key actions such as opening Sound settings.
         guard !key.modifierFlags.contains(.option), !key.modifierFlags.contains(.command), !key.modifierFlags.contains(.control) else { return false }
         device.refresh()
-        guard device.volumeAvailable else { return false }
+        if code == 2 || code == 3 {
+            guard UserDefaults.standard.bool(forKey: "replaceBrightnessHUD"), device.brightnessAvailable else { return false }
+            let step = key.modifierFlags.contains(.shift) ? 1.0 / 64 : 1.0 / 16
+            device.changeBrightness(device.brightness + (code == 2 ? step : -step))
+            guard device.brightnessAvailable, device.message == nil else { return false }
+            device.refresh(); onLevel?("Brightness", device.brightness); consumed.insert(code); return true
+        }
+        guard UserDefaults.standard.bool(forKey: "replaceVolumeHUD"), device.volumeAvailable else { return false }
         let old = device.volume
         if code == 7 {
             let mute = old > 0
@@ -329,17 +336,19 @@ struct UpdateSettings: View {
             device.changeVolume(min(1, max(0, old + (code == 0 ? step : -step))))
             guard device.message == nil else { return false }
         }
-        device.refresh(); onLevel?(device.volume); consumed.insert(code)
+        device.refresh(); onLevel?("Volume", device.volume); consumed.insert(code)
         return true
     }
 }
 
 struct VolumeHUDSettings: View {
     @AppStorage("replaceVolumeHUD") private var enabled = false
+    @AppStorage("replaceBrightnessHUD") private var brightnessEnabled = false
     @ObservedObject private var keys = NotchVolumeKeys.shared
     var body: some View {
         Toggle("Replace macOS volume popup", isOn: $enabled).onChange(of: enabled) { _ in keys.configure() }
-        if enabled {
+        Toggle("Replace macOS brightness popup", isOn: $brightnessEnabled).onChange(of: brightnessEnabled) { _ in keys.configure() }
+        if enabled || brightnessEnabled {
             Text(keys.status).font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Allow Accessibility…") { keys.requestPermission() }

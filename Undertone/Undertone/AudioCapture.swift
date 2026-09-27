@@ -149,8 +149,16 @@ final class AudioSink: NSObject, SCStreamOutput, SCStreamDelegate {
 }
 
 enum SpotifyAudioSource {
-    static func matches(_ bundleID: String) -> Bool {
-        bundleID == "com.spotify.client" || bundleID.hasPrefix("com.spotify.client.")
+    static var selectedBundle: String {
+        switch UserDefaults.standard.string(forKey: "playerSource") {
+        case "Apple Music": return "com.apple.Music"
+        case "Safari": return "com.apple.Safari"
+        case "Chrome": return "com.google.Chrome"
+        default: return "com.spotify.client"
+        }
+    }
+    static func matches(_ bundleID: String, selected: String = "com.spotify.client") -> Bool {
+        bundleID == selected || bundleID.hasPrefix(selected + ".")
     }
     @available(macOS 14.2, *)
     static func processIDs() throws -> [AudioObjectID] {
@@ -167,7 +175,7 @@ enum SpotifyAudioSource {
             var bundle: Unmanaged<CFString>?
             var length = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
             guard AudioObjectGetPropertyData(id, &property, 0, nil, &length, &bundle) == noErr, let bundle else { return false }
-            return matches(bundle.takeRetainedValue() as String)
+            return matches(bundle.takeRetainedValue() as String, selected: selectedBundle)
         }.sorted()
     }
 }
@@ -307,7 +315,7 @@ final class SystemAudioTap {
             if #available(macOS 14.2, *) {
                 capturedProcesses = try SpotifyAudioSource.processIDs()
                 guard !capturedProcesses.isEmpty else {
-                    message = "Waiting for Spotify. Play a song on this Mac."
+                    message = "Waiting for the selected player. Play audio on this Mac."
                     return
                 }
                 let tap = SystemAudioTap()
@@ -326,7 +334,7 @@ final class SystemAudioTap {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard !displaySleeping else { return }
             guard let display = content.displays.first else { throw CaptureError.noDisplay }
-            let applications = content.applications.filter { SpotifyAudioSource.matches($0.bundleIdentifier) }
+            let applications = content.applications.filter { SpotifyAudioSource.matches($0.bundleIdentifier, selected: SpotifyAudioSource.selectedBundle) }
             guard !applications.isEmpty else { throw CaptureError.noSpotify }
             let filter = SCContentFilter(display: display, including: applications, exceptingWindows: [])
             let config = SCStreamConfiguration()
@@ -368,7 +376,7 @@ final class SystemAudioTap {
             beginMonitoring()
         } catch CaptureError.noSpotify {
             reset()
-            message = "Open Spotify on this Mac, then enable audio again."
+            message = "Open the selected player on this Mac, then enable audio again."
         } catch {
             reset()
             message = "Audio unavailable: \(error.localizedDescription) Allow this build of Undertone in Privacy & Security → Screen & System Audio Recording (System Audio Recording on newer macOS), then retry or relaunch."
@@ -395,13 +403,13 @@ final class SystemAudioTap {
         peakLevel = max(peakLevel, values.max() ?? 0)
         receivedFrames += frames
         hasSignal = values.contains { $0 > 0.015 }
-        message = hasSignal ? "Receiving Spotify audio only" : "Receiving audio • currently silent"
+        message = hasSignal ? "Receiving selected-player audio" : "Receiving audio • currently silent"
     }
 
     private func beginMonitoring() {
             running = true
             lastSample = Date()
-            message = "Live • Spotify only"
+            message = "Live • selected player"
             watchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, self.running else { return }
@@ -409,7 +417,7 @@ final class SystemAudioTap {
                         self.levels = self.levels.map { $0 < 0.01 ? 0 : $0 * 0.65 }
                         self.hasSignal = false
                         if Date().timeIntervalSince(self.lastSample) > 3 {
-                            self.message = "No audio buffers received. Play Spotify on this Mac, then try Restart audio. If it stays flat, quit and reopen Undertone after checking Screen & System Audio Recording permission."
+                            self.message = "No audio buffers received. Play the selected player on this Mac, then try Restart audio. If it stays flat, quit and reopen Undertone after checking Screen & System Audio Recording permission."
                         }
                     }
                 }
@@ -450,7 +458,7 @@ final class SystemAudioTap {
         var errorDescription: String? {
             switch self {
             case .noDisplay: return "No display is available for audio capture."
-            case .noSpotify: return "Open Spotify on this Mac, then enable audio again."
+            case .noSpotify: return "Open the selected player on this Mac, then enable audio again."
             }
         }
     }

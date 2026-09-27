@@ -49,11 +49,17 @@ struct SettingsDashboard: View {
             Section("Volume indicator") { VolumeHUDSettings() }
             Section("Sleep timer") { SleepTimerSettings(timer: spotify.sleepTimer) { spotify.pause() } }
             Section("Updates") { UpdateSettings() }
-            Section("Spotify") {
+            Section("Music player") {
+                Picker("Player", selection: $spotify.playerSource) {
+                    ForEach(["Spotify", "Apple Music", "Safari", "Chrome"], id: \.self) { Text($0).tag($0) }
+                }.onChange(of: spotify.playerSource) { _ in Task { if audio.running { await audio.restart() } } }
+                Text("Browser mode controls HTML audio/video in the active tab. Enable JavaScript from Apple Events in that browser’s developer menu. Cross-origin frames and some streaming sites are unavailable. Browser audio capture includes other tabs.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Spotify account") {
                 LabeledContent("Connection", value: spotify.connected ? "Connected automatically" : "Waiting for Spotify")
                 Text("Undertone connects when Spotify opens and retries temporary errors. The first connection requires Automation permission.")
                     .font(.caption).foregroundStyle(.secondary)
-                HStack { Button("Open Spotify") { spotify.openSpotify() }; Button("Retry connection") { spotify.connect() } }
+                HStack { Button("Open selected player") { spotify.openSpotify() }; Button("Retry connection") { spotify.connect() } }
                 if let error = spotify.error { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
                 SpotifyLibrarySettings(library: spotify.library)
             }
@@ -65,7 +71,7 @@ struct SettingsDashboard: View {
                     }
                     Button("Restart audio") { Task { await audio.restart() } }
                 }.disabled(audio.busy)
-                Text("Audio stays on this Mac. Other apps’ audio is excluded.").font(.caption).foregroundStyle(.secondary)
+                Text("Audio stays on this Mac. Capture follows the selected player; browser capture can include all its tabs.").font(.caption).foregroundStyle(.secondary)
                 Button("Privacy settings…") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security")!) }
             }
         }.formStyle(.grouped)
@@ -87,6 +93,7 @@ struct SettingsDashboard: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text(lockPlayer.status).font(.caption).foregroundStyle(.secondary)
             }
+            ModulePreferences(state: state)
             Section("Lyrics") {
                 LyricsImportSettings(store: lockPlayer.lyrics, spotify: spotify)
             }

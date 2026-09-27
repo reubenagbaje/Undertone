@@ -4,7 +4,7 @@ Undertone 1.22 embeds Sparkle 2.10.0. Its public Ed25519 key is in Info.plist. T
 
 The update feed URL is `https://raw.githubusercontent.com/reubenagbaje/Undertone/main/appcast.xml`. Both the appcast and archive must be signed. Automatic checks are opt-in; automatic download/installation has its own toggle. Existing 1.21 installations need to install 1.22 manually once because they do not contain Sparkle.
 
-Release v1.24 uses the signed feed at the repository root and the unmodified Mac ZIP attached to GitHub release v1.24. Enable automatic checks in General → Updates; automatic download/installation is a separate preference. Version 1.21 and older require a manual update first.
+Release v1.24 uses the signed feed at the repository root and the unmodified Mac ZIP attached to GitHub release `Update` (app version 1.24). Enable automatic checks in General → Updates; automatic download/installation is a separate preference. Version 1.21 and older require a manual update first.
 
 Do not edit signed feeds or rebuild a ZIP after signing. An update must keep the same bundle identifier and public key and increase CFBundleVersion. Verify the feed and archive signatures before publishing, then test Check for Updates from an older installed build.
 

@@ -50,7 +50,7 @@ A notched MacBook gives the intended appearance. On displays without a notch, Un
 
 ## Installation
 
-1. Download [Undertone v1.24](https://github.com/reubenagbaje/Undertone/releases/tag/v1.24).
+1. Download [Undertone v1.24](https://github.com/reubenagbaje/Undertone/releases/tag/Update).
 2. Unzip it and move **Undertone.app** to Applications.
 3. Open Undertone, then open Spotify and play a song.
 4. Undertone connects to Spotify automatically. Approve Automation access if requested; use **Settings → General → Retry connection** after resolving a permission denial.

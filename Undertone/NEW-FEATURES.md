@@ -31,3 +31,11 @@ Visual reference: [Apple's Dynamic Island Live Activities guide](https://support
 When File Shelf is enabled, dragging a local file over the notch opens Tools → Files before drop, including from the hidden idle activation area. Disabled shelf and presentation mode do not trigger the drawer. Moving away without dropping follows the normal collapse delay after the drag ends. Files are added only after a drop.
 
 Version 1.27 is build 32, newer than the repaired v1.26.1 (31), for testing Sparkle updates. Versions before v1.26.1 still require the one-time manual updater repair.
+
+## v1.28 — Layout and file-drag repair
+
+Replaced the four-square shortcut with a discreet Tools label. The timer footer now uses padded pill buttons above the lower curve, with clearer countdown typography and more consistent track-title line heights. Idle timers no longer publish a changing timestamp every second, and fallback hardware-level sampling runs less frequently.
+
+Fixed accidental File Shelf opening when clicking playback controls or the bottom of the player: macOS retains drag pasteboard contents after a drag, so the app now requires a fresh pasteboard change during the current press. Native drop-target events continue to reveal Files on a real drag. Regression tests cover stale data, repeated clicks, a fresh drag, release, and non-file drags.
+
+The separate `Undertone-Windows` project is a native preview with its own documented feature differences. It is not part of the Mac automatic-update archive.

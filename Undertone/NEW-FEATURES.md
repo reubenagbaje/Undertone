@@ -21,3 +21,13 @@ Timers, downloads, the file shelf and audio output switching are now individuall
 Settings and Tools now share dark surfaces, rounded pill controls and consistent typography. Core Spotify playback remains available without enabling extra modules.
 
 Fixed Sparkle startup: signed feeds require `SUVerifyUpdateBeforeExtraction` as well as `SURequireSignedFeed`. Both are enabled. Settings now exposes update status/errors. Versions with the broken startup configuration need one manual installation of this repair; a feed change alone cannot start their updater. Automatic checks remain an explicit Settings preference.
+
+## v1.27 — Live timer and file drag reveal
+
+Enable Timers in Settings → Modules, then start one from Tools → Activities. The compact notch shows an orange countdown and progress symbol, with room reserved for the physical camera. Hover to expand its pause/resume and cancel controls. A completed timer remains visible with a restart action. Music opens the regular player without cancelling the timer. Timers continue by deadline while the display sleeps; paused timers preserve their remaining time. They do not survive quitting the app.
+
+Visual reference: [Apple's Dynamic Island Live Activities guide](https://support.apple.com/guide/iphone/view-live-activities-in-the-dynamic-island-iph28f50d10d/ios) and [compact/expanded timer reference](https://mobilelaby.net/images/2022/09/dynmic-island-timer-widget.jpg). No reference assets are bundled.
+
+When File Shelf is enabled, dragging a local file over the notch opens Tools → Files before drop, including from the hidden idle activation area. Disabled shelf and presentation mode do not trigger the drawer. Moving away without dropping follows the normal collapse delay after the drag ends. Files are added only after a drop.
+
+Version 1.27 is build 32, newer than the repaired v1.26.1 (31), for testing Sparkle updates. Versions before v1.26.1 still require the one-time manual updater repair.

@@ -13,3 +13,11 @@ Open the four-square Tools button near the top-right of the expanded player.
 - Brightness popup replacement: General → Volume indicator → Replace macOS brightness popup. Grant Accessibility access and Retry, as with volume. Supported brightness key presses adjust the display and show only Undertone’s indicator. Unsupported hardware or failed writes pass through to macOS. Option-modified keys retain the system action. This does not change system-wide security settings or suppress unrelated popups.
 
 Validation: universal Release build and regression suite, including selected-player capture filtering and download URL validation. Live Accessibility interception, output switching, Bluetooth, real download transfers, Apple Music/browser playback and multi-monitor layout require on-device testing. Browser developer permissions are never enabled automatically. The release remains ad-hoc signed and not notarized.
+
+## v1.26.1 — Optional modules and updater repair
+
+Timers, downloads, the file shelf and audio output switching are now individually opt-in in Settings → Modules. Disabled tools disappear from the player. Disabling timers/downloads cancels their active task; disabling the shelf removes references without deleting files. Charging and headphone notices remain optional.
+
+Settings and Tools now share dark surfaces, rounded pill controls and consistent typography. Core Spotify playback remains available without enabling extra modules.
+
+Fixed Sparkle startup: signed feeds require `SUVerifyUpdateBeforeExtraction` as well as `SURequireSignedFeed`. Both are enabled. Settings now exposes update status/errors. Versions with the broken startup configuration need one manual installation of this repair; a feed change alone cannot start their updater. Automatic checks remain an explicit Settings preference.

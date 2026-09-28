@@ -147,3 +147,16 @@ struct ActivityCountdown {
         return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
     }
 }
+
+/// The drag pasteboard outlives a drag. Only a fresh change while the button is held
+/// is evidence of a new drag; clicks on playback controls must never reuse it.
+struct FileDragIntent {
+    private var previousChange: Int?
+    private(set) var active = false
+    mutating func update(change: Int, buttonDown: Bool, containsFiles: Bool) -> Bool {
+        defer { previousChange = change }
+        guard buttonDown else { active = false; return false }
+        if let previousChange, change != previousChange { active = containsFiles }
+        return active && containsFiles
+    }
+}

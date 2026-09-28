@@ -60,8 +60,8 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
     func cancelTimer() { countdown.cancel() }
     private func tick() {
         ticks += 1
-        timerNow = Date()
-        if countdown.consumeExpiration(now: timerNow) { NSSound(named: "Glass")?.play() }
+        if countdown.deadline != nil { timerNow = Date() }
+        if countdown.deadline != nil && countdown.consumeExpiration(now: timerNow) { NSSound(named: "Glass")?.play() }
         if ticks % 5 == 0 {
             if batteryEnabled { readBattery() }
             if headphonesEnabled { readHeadphones() }
@@ -330,8 +330,8 @@ struct LiveTimerCard: View {
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 3) {
                 Text(modules.countdown.finished ? "Timer finished" : modules.countdown.paused ? "Paused" : "Timer")
-                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.orange.opacity(0.7))
-                Text(modules.timerText).font(.system(size: 34, weight: .light, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange.opacity(0.85))
+                Text(modules.timerText).font(.system(size: 32, weight: .regular))
                     .monospacedDigit().foregroundStyle(.orange).minimumScaleFactor(0.65).lineLimit(1)
             }
         }.buttonStyle(.plain).accessibilityElement(children: .contain)

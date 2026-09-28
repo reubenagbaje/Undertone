@@ -14,8 +14,12 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
     @Published var activity: String?
     @Published var activitySymbol = "timer"
     @Published var files: [URL] = []
-    @Published var deadline: Date?
-    @Published var remaining = 0
+    @Published private(set) var countdown = ActivityCountdown()
+    @Published private(set) var timerNow = Date()
+    @Published var selectedTab = 0
+    var remaining: Int { countdown.remaining(at: timerNow) }
+    var timerActive: Bool { timersEnabled && countdown.active }
+    var timerText: String { ActivityCountdown.formatted(remaining) }
     @Published var downloadProgress: Double?
     @Published var downloading = false
     @Published var downloadName = ""
@@ -46,21 +50,24 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
     func setSleeping(_ sleeping: Bool) { timer?.fireDate = sleeping ? .distantFuture : Date() }
     func stop() { timer?.invalidate(); timer = nil; task?.cancel(); session?.invalidateAndCancel() }
     func announce(_ text: String, symbol: String) { activity = text; activitySymbol = symbol; noticeUntil = Date().addingTimeInterval(5) }
-    func startTimer(minutes: Int) { guard timersEnabled else { return }; deadline = Date().addingTimeInterval(Double(minutes * 60)); tick() }
-    func cancelTimer() { deadline = nil; remaining = 0; activity = nil }
+    func startTimer(minutes: Int) {
+        guard timersEnabled else { return }
+        timerNow = Date(); countdown.start(seconds: Double(minutes * 60), now: timerNow)
+        selectedTab = 0
+    }
+    func toggleTimer() { timerNow = Date(); countdown.togglePause(now: timerNow) }
+    func restartTimer() { timerNow = Date(); countdown.start(seconds: countdown.duration, now: timerNow) }
+    func cancelTimer() { countdown.cancel() }
     private func tick() {
         ticks += 1
-        if let deadline {
-            remaining = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
-            if remaining == 0 { self.deadline = nil; announce("Timer finished", symbol: "timer"); NSSound(named: "Glass")?.play() }
-        }
+        timerNow = Date()
+        if countdown.consumeExpiration(now: timerNow) { NSSound(named: "Glass")?.play() }
         if ticks % 5 == 0 {
             if batteryEnabled { readBattery() }
             if headphonesEnabled { readHeadphones() }
         }
         if Date() > noticeUntil {
-            if deadline != nil { activity = "Timer · \(remaining / 60):\(String(format: "%02d", remaining % 60))"; activitySymbol = "timer" }
-            else if downloading { activity = downloadProgress.map { "Downloading · \(Int($0 * 100))%" } ?? "Downloading…"; activitySymbol = "arrow.down.circle" }
+            if downloading { activity = downloadProgress.map { "Downloading · \(Int($0 * 100))%" } ?? "Downloading…"; activitySymbol = "arrow.down.circle" }
             else { activity = nil }
         }
     }
@@ -181,7 +188,7 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
 struct IslandToolsView: View {
     @ObservedObject private var modules = IslandModules.shared
     @State private var downloadURL = ""
-    @State private var selected = 0
+    private var selected: Int { modules.selectedTab }
     private var availableTabs: [Int] {
         var tabs: [Int] = []
         if modules.timersEnabled || modules.downloadsEnabled || modules.batteryEnabled || modules.headphonesEnabled { tabs.append(0) }
@@ -193,7 +200,7 @@ struct IslandToolsView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 ForEach(availableTabs, id: \.self) { tab in
-                    Button { selected = tab } label: {
+                    Button { modules.selectedTab = tab } label: {
                         Label(["Activities", "Files", "Sound"][tab], systemImage: ["timer", "tray", "speaker.wave.2"][tab])
                             .font(.system(size: 11, weight: .semibold)).frame(maxWidth: .infinity).padding(.vertical, 9)
                             .background(.white.opacity(selected == tab ? 0.16 : 0.04), in: Capsule())
@@ -201,11 +208,15 @@ struct IslandToolsView: View {
                 }
             }.padding(.bottom, 8)
             if selected == 0 {
-                if modules.timersEnabled { HStack {
-                    Label(modules.deadline == nil ? "Timer" : "\(modules.remaining / 60):\(String(format: "%02d", modules.remaining % 60))", systemImage: "timer").monospacedDigit()
-                    Spacer()
-                    Menu("Set") { ForEach([1, 5, 10, 25, 45, 60], id: \.self) { n in Button("\(n) minutes") { modules.startTimer(minutes: n) } }; Button("Cancel") { modules.cancelTimer() } }
-                }
+                if modules.timersEnabled {
+                    if modules.timerActive { LiveTimerCard().frame(height: 86) }
+                    else {
+                        HStack {
+                            Label("Timer", systemImage: "timer").foregroundStyle(.orange)
+                            Spacer()
+                            Menu("Start timer") { ForEach([1, 5, 10, 25, 45, 60], id: \.self) { n in Button("\(n) minutes") { modules.startTimer(minutes: n) } } }
+                        }.padding(.vertical, 10)
+                    }
                 }
                 if !modules.batteryText.isEmpty { Label(modules.batteryText, systemImage: "battery.100") }
                 ForEach(modules.headphones, id: \.self) { Text($0).font(.caption) }
@@ -244,8 +255,8 @@ struct IslandToolsView: View {
             if let message = modules.message { Text(message).font(.caption).foregroundStyle(.orange).lineLimit(3) }
             Spacer(minLength: 0)
         }.font(.system(size: 12, weight: .medium)).buttonStyle(IslandToolButtonStyle()).tint(.white).controlSize(.small).padding(.horizontal, 32).padding(.bottom, 24).foregroundStyle(.white)
-            .onAppear { selected = availableTabs.first ?? 0; if modules.outputsEnabled { modules.refreshRoutes() } }
-            .onChange(of: availableTabs) { tabs in if !tabs.contains(selected) { selected = tabs.first ?? 0 } }
+            .onAppear { if !availableTabs.contains(selected) { modules.selectedTab = availableTabs.first ?? 0 }; if modules.outputsEnabled { modules.refreshRoutes() } }
+            .onChange(of: availableTabs) { tabs in if !tabs.contains(selected) { modules.selectedTab = tabs.first ?? 0 } }
     }
 }
 
@@ -300,5 +311,42 @@ struct IslandToolButtonStyle: ButtonStyle {
             .opacity(enabled ? 1 : 0.4)
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+struct LiveTimerCard: View {
+    @ObservedObject private var modules = IslandModules.shared
+    var body: some View {
+        HStack(spacing: 10) {
+            Button { modules.countdown.finished ? modules.restartTimer() : modules.toggleTimer() } label: {
+                Image(systemName: modules.countdown.finished ? "arrow.counterclockwise" : modules.countdown.paused ? "play.fill" : "pause.fill")
+                    .font(.system(size: 19, weight: .semibold)).frame(width: 46, height: 46)
+                    .foregroundStyle(.orange).background(.orange.opacity(0.19), in: Circle())
+            }.accessibilityLabel(modules.countdown.finished ? "Restart timer" : modules.countdown.paused ? "Resume timer" : "Pause timer")
+            Button { modules.cancelTimer() } label: {
+                Image(systemName: "xmark").font(.system(size: 19, weight: .medium)).frame(width: 46, height: 46)
+                    .foregroundStyle(.white).background(.white.opacity(0.15), in: Circle())
+            }.accessibilityLabel("Cancel timer")
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(modules.countdown.finished ? "Timer finished" : modules.countdown.paused ? "Paused" : "Timer")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.orange.opacity(0.7))
+                Text(modules.timerText).font(.system(size: 34, weight: .light, design: .rounded))
+                    .monospacedDigit().foregroundStyle(.orange).minimumScaleFactor(0.65).lineLimit(1)
+            }
+        }.buttonStyle(.plain).accessibilityElement(children: .contain)
+    }
+}
+
+struct CompactTimerSymbol: View {
+    @ObservedObject private var modules = IslandModules.shared
+    var body: some View {
+        ZStack {
+            Circle().stroke(.orange.opacity(0.22), lineWidth: 2)
+            Circle().trim(from: 0, to: modules.countdown.progress(at: modules.timerNow))
+                .stroke(.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
+            Image(systemName: modules.countdown.finished ? "checkmark" : modules.countdown.paused ? "pause.fill" : "timer")
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.orange)
+        }.frame(width: 22, height: 22)
     }
 }

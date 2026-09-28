@@ -49,6 +49,9 @@ final class IslandPanel: NSPanel {
         didSet { UserDefaults.standard.set(alwaysShowNotch, forKey: "alwaysShowNotch") }
     }
     @Published var toolsOpen = false
+    @Published var timerActive = false
+    @Published var timerFocused = true
+    @Published var fileDragHover = false
     @Published var moduleNotice: String?
     @Published var moduleSymbol = "timer"
     @Published var selectedDisplay = UserDefaults.standard.string(forKey: "selectedDisplay") ?? "auto" {
@@ -88,17 +91,17 @@ final class IslandPanel: NSPanel {
     @Published var reverseSwipes = UserDefaults.standard.bool(forKey: "reverseSwipes") {
         didSet { UserDefaults.standard.set(reverseSwipes, forKey: "reverseSwipes") }
     }
-    var dormant: Bool { !playbackActive && !previewing && !expanded && trackNotice == nil && levelKind == nil && moduleNotice == nil }
+    var dormant: Bool { !timerActive && !playbackActive && !previewing && !expanded && trackNotice == nil && levelKind == nil && moduleNotice == nil }
     var wingWidth: CGFloat { trackNotice != nil ? 44 : (previewing || swipeEngaged) ? 46 : 34 }
     var swipeVisual: SwipePresentation { SwipePresentation(progress: Double(swipeProgress), reversed: reverseSwipes) }
     var swipeExtension: CGFloat { expanded ? 0 : CGFloat(swipeVisual.extensionWidth) }
     var shellOffset: CGFloat { CGFloat(swipeVisual.forward ? 1 : -1) * swipeExtension / 2 }
     var shoulder: CGFloat { dynamicIsland ? 0 : expanded ? 19 : (levelKind != nil || moduleNotice != nil) ? max(12, CGFloat(idleCornerCurve)) : CGFloat(idleCornerCurve) }
     var bottomCornerRadius: CGFloat { expanded ? 50 : (levelKind != nil || moduleNotice != nil) ? 28 : trackNotice == nil ? 17 : 24 }
-    var compactWidth: CGFloat { notchWidth + wingWidth * 2 + shoulder * 2 + (dynamicIsland ? 20 : 0) }
+    var compactWidth: CGFloat { timerActive ? notchWidth + 148 + shoulder * 2 : notchWidth + wingWidth * 2 + shoulder * 2 + (dynamicIsland ? 20 : 0) }
     var compactHeight: CGFloat { notchHeight + (previewing || swipeEngaged || trackNotice != nil ? 2 : 1) }
-    var visibleWidth: CGFloat { expanded ? expandedWidth : (levelKind != nil || moduleNotice != nil) ? max(280, notchWidth + 32) : dormant ? notchWidth : compactWidth + swipeExtension }
-    var visibleHeight: CGFloat { expanded ? expandedHeight + notchHeight + ((queueOpen || toolsOpen) ? 280 : 0) + (levelKind == nil ? 0 : 76) : levelKind != nil ? notchHeight + 72 : moduleNotice != nil ? notchHeight + 44 : dormant ? notchHeight : compactHeight + (trackNotice == nil ? 0 : 36) }
+    var visibleWidth: CGFloat { expanded ? expandedWidth : levelKind != nil ? max(280, notchWidth + 32) : timerActive ? compactWidth : moduleNotice != nil ? max(280, notchWidth + 32) : dormant ? notchWidth : compactWidth + swipeExtension }
+    var visibleHeight: CGFloat { expanded ? (timerActive && timerFocused && !toolsOpen && !queueOpen ? 108 : expandedHeight) + notchHeight + ((queueOpen || toolsOpen) ? 280 : 0) + (levelKind == nil ? 0 : 76) : levelKind != nil ? notchHeight + 72 : timerActive ? compactHeight : moduleNotice != nil ? notchHeight + 44 : dormant ? notchHeight : compactHeight + (trackNotice == nil || timerActive ? 0 : 36) }
     func open() {
         guard !expanded else { return }
         if haptics {
@@ -110,6 +113,7 @@ final class IslandPanel: NSPanel {
         pinned = false
         queueOpen = false
         toolsOpen = false
+        timerFocused = true
         withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : IslandMotion.retract) { expanded = false }
     }
 }
@@ -262,6 +266,7 @@ final class IslandPanel: NSPanel {
             panel.orderOut(nil); return
         } else if !panel.isVisible { panel.orderFrontRegardless() }
         if spotify.playerSource != "Spotify" { state.queueOpen = false }
+        state.timerActive = IslandModules.shared.timerActive
         state.moduleNotice = IslandModules.shared.activity
         state.moduleSymbol = IslandModules.shared.activitySymbol
         state.playbackActive = spotify.connected && spotify.playing
@@ -287,15 +292,21 @@ final class IslandPanel: NSPanel {
                 notice.show("\(spotify.artist) • \(spotify.title)", now: now)
             }
         }
-        notice.update(now: now, dismiss: state.expanded || !spotify.connected)
+        notice.update(now: now, dismiss: state.expanded || state.timerActive || !spotify.connected)
         if state.trackNotice != notice.text { state.trackNotice = notice.text }
         let width = state.visibleWidth
         let height = state.visibleHeight + (state.dormant ? 3 : 0)
         let rect = NSRect(x: anchor.x + state.shellOffset - width / 2, y: anchor.y - height, width: width, height: height)
         let pointer = NSEvent.mouseLocation
         let inside = NotchHitTarget.contains(pointer, in: rect)
+        let fileDrag = NSEvent.pressedMouseButtons != 0 && (NSPasteboard(name: .drag).types?.contains(.fileURL) == true)
+        state.fileDragHover = fileDrag && inside && IslandModules.shared.shelfEnabled
+        if state.fileDragHover {
+            IslandModules.shared.selectedTab = 1
+            state.queueOpen = false; state.toolsOpen = true; state.open()
+        }
         // The tiny idle activation strip is pointer-tracked but remains click-through.
-        panel.ignoresMouseEvents = (!inside && !swipeIntent.active) || state.dormant
+        panel.ignoresMouseEvents = (!inside && !swipeIntent.active) || (state.dormant && !state.fileDragHover)
         if !inside, !swipeIntent.active {
             suppressHoverUntilExit = false
         }
@@ -455,6 +466,25 @@ struct IslandView: View {
                 if !state.expanded, let kind = state.levelKind {
                     Color.clear.frame(height: state.notchHeight)
                     NotchLevelView(kind: kind, value: state.levelValue, expanded: false).frame(height: 72)
+                } else if !state.expanded, modules.timerActive {
+                    HStack(spacing: 0) {
+                        CompactTimerSymbol().frame(width: 74)
+                        Color.clear.frame(width: state.notchWidth)
+                        Text(modules.timerText).font(.system(size: 16, weight: .medium, design: .rounded)).monospacedDigit()
+                            .foregroundStyle(.orange).frame(width: 74)
+                    }.frame(height: state.compactHeight)
+                        .contentShape(Rectangle()).onTapGesture { state.timerFocused = true; state.open() }
+                } else if state.expanded && modules.timerActive && state.timerFocused && !state.toolsOpen && !state.queueOpen {
+                    VStack(spacing: 8) {
+                        Color.clear.frame(height: state.notchHeight)
+                        LiveTimerCard().padding(.horizontal, 28).frame(height: 64)
+                        HStack {
+                            Button("Music") { withAnimation(reduceMotion ? nil : IslandMotion.morph) { state.timerFocused = false } }
+                            Spacer()
+                            if modules.hasTools { Button("Tools") { state.toolsOpen = true } }
+                        }.font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).buttonStyle(.plain).padding(.horizontal, 30)
+                    }
+                    if let kind = state.levelKind { NotchLevelView(kind: kind, value: state.levelValue, expanded: true).frame(height: 76) }
                 } else if !state.expanded, let notice = state.moduleNotice {
                     Color.clear.frame(height: state.notchHeight)
                     Label(notice, systemImage: state.moduleSymbol).font(.system(size: 12, weight: .semibold)).lineLimit(1).padding(.horizontal, 28).frame(height: 44)
@@ -562,8 +592,13 @@ struct IslandView: View {
                 }
             }
             .onChange(of: modules.hasTools) { enabled in if !enabled { state.toolsOpen = false } }
-            .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
+            .onChange(of: modules.timerActive) { active in state.timerActive = active; if active { state.timerFocused = true } }
+            .onDrop(of: [UTType.fileURL.identifier], isTargeted: Binding(get: { state.fileDragHover }, set: { targeted in
+                state.fileDragHover = targeted && modules.shelfEnabled && !modules.presentation
+                if state.fileDragHover { modules.selectedTab = 1; state.queueOpen = false; state.toolsOpen = true; state.open() }
+            })) { providers in
                 guard modules.shelfEnabled, !modules.presentation else { return false }
+                modules.selectedTab = 1
                 state.queueOpen = false; state.toolsOpen = true; state.open()
                 return IslandModules.shared.accept(providers)
             }
@@ -575,6 +610,8 @@ struct IslandView: View {
             .animation(reduceMotion ? nil : state.expanded ? IslandMotion.morph : IslandMotion.retract, value: state.expanded)
             .animation(reduceMotion ? nil : IslandMotion.morph, value: state.queueOpen)
             .animation(reduceMotion ? nil : IslandMotion.morph, value: state.toolsOpen)
+            .animation(reduceMotion ? nil : IslandMotion.morph, value: state.timerActive)
+            .animation(reduceMotion ? nil : IslandMotion.morph, value: state.timerFocused)
             .animation(reduceMotion ? nil : IslandMotion.preview, value: state.moduleNotice)
             .animation(reduceMotion ? nil : IslandMotion.morph, value: state.levelKind)
             .animation(reduceMotion ? nil : IslandMotion.hover, value: state.previewing)

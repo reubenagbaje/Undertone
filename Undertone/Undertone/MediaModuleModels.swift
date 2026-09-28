@@ -117,3 +117,33 @@ enum ActivityDownloadURL {
         return url
     }
 }
+
+/// Deadline-based countdown: pausing preserves fractional seconds; sleep does not delay completion.
+struct ActivityCountdown {
+    private(set) var duration: TimeInterval = 0
+    private(set) var deadline: Date?
+    private(set) var pausedRemaining: TimeInterval = 0
+    private(set) var finished = false
+    var active: Bool { deadline != nil || pausedRemaining > 0 || finished }
+    var paused: Bool { deadline == nil && pausedRemaining > 0 }
+    func seconds(at now: Date) -> TimeInterval { max(0, deadline?.timeIntervalSince(now) ?? pausedRemaining) }
+    func remaining(at now: Date) -> Int { Int(ceil(seconds(at: now))) }
+    func progress(at now: Date) -> Double { duration > 0 ? min(1, seconds(at: now) / duration) : 0 }
+    mutating func start(seconds: TimeInterval, now: Date) {
+        guard seconds.isFinite, seconds > 0 else { cancel(); return }
+        duration = seconds; deadline = now.addingTimeInterval(seconds); pausedRemaining = 0; finished = false
+    }
+    mutating func togglePause(now: Date) {
+        if paused { deadline = now.addingTimeInterval(pausedRemaining); pausedRemaining = 0 }
+        else if deadline != nil { pausedRemaining = seconds(at: now); deadline = nil; if pausedRemaining == 0 { finished = true } }
+    }
+    mutating func consumeExpiration(now: Date) -> Bool {
+        guard let deadline, now >= deadline else { return false }
+        self.deadline = nil; pausedRemaining = 0; finished = true; return true
+    }
+    mutating func cancel() { deadline = nil; pausedRemaining = 0; finished = false }
+    static func formatted(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
+    }
+}

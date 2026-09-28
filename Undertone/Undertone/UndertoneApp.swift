@@ -438,6 +438,7 @@ struct IslandShape: Shape {
 }
 
 struct IslandView: View {
+    @ObservedObject private var modules = IslandModules.shared
     @ObservedObject var state: IslandState
     @ObservedObject var spotify: SpotifyController
     @ObservedObject var audio: AudioCapture
@@ -560,8 +561,9 @@ struct IslandView: View {
                         .padding(0.375).allowsHitTesting(false)
                 }
             }
+            .onChange(of: modules.hasTools) { enabled in if !enabled { state.toolsOpen = false } }
             .onDrop(of: [UTType.fileURL.identifier], isTargeted: nil) { providers in
-                guard !IslandModules.shared.presentation else { return false }
+                guard modules.shelfEnabled, !modules.presentation else { return false }
                 state.queueOpen = false; state.toolsOpen = true; state.open()
                 return IslandModules.shared.accept(providers)
             }
@@ -803,6 +805,7 @@ struct TrackHeading: View {
 }
 
 struct PlayerView: View {
+    @ObservedObject private var modules = IslandModules.shared
     @ObservedObject var spotify: SpotifyController
     @ObservedObject var audio: AudioCapture
     let openLibrarySettings: () -> Void
@@ -821,7 +824,7 @@ struct PlayerView: View {
         GeometryReader { geometry in
             let scale = (geometry.size.width - 38) / 360
             ZStack(alignment: .topLeading) {
-                if let toolsAction {
+                if let toolsAction, modules.hasTools {
                     Button(action: toolsAction) { Image(systemName: "square.grid.2x2").font(.system(size: 11, weight: .semibold)).frame(width: 28, height: 20) }.buttonStyle(SpringControlStyle()).accessibilityLabel("Activities, files and audio outputs").offset(x: 274, y: 9)
                 }
                 if !hideArtwork {

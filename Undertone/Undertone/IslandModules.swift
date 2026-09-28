@@ -22,6 +22,14 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
     @Published var batteryText = ""
     @Published var headphones: [String] = []
     @Published var presentation = false { didSet { NotificationCenter.default.post(name: .init("UndertonePresentationChanged"), object: nil) } }
+    @Published var timersEnabled = UserDefaults.standard.bool(forKey: "enableActivityTimers") { didSet { changed("enableActivityTimers", timersEnabled); if !timersEnabled { cancelTimer() } } }
+    @Published var downloadsEnabled = UserDefaults.standard.bool(forKey: "enableActivityDownloads") { didSet { changed("enableActivityDownloads", downloadsEnabled); if !downloadsEnabled { cancelDownload() } } }
+    @Published var shelfEnabled = UserDefaults.standard.bool(forKey: "enableFileShelf") { didSet { changed("enableFileShelf", shelfEnabled); if !shelfEnabled { files = [] } } }
+    @Published var outputsEnabled = UserDefaults.standard.bool(forKey: "enableOutputSwitcher") { didSet { changed("enableOutputSwitcher", outputsEnabled); if outputsEnabled { refreshRoutes() } else { routes = [] } } }
+    @Published var batteryEnabled = UserDefaults.standard.bool(forKey: "batteryActivities") { didSet { changed("batteryActivities", batteryEnabled); if !batteryEnabled { batteryText = ""; previousCharging = nil; activity = nil } } }
+    @Published var headphonesEnabled = UserDefaults.standard.bool(forKey: "headphoneActivities") { didSet { changed("headphoneActivities", headphonesEnabled); if !headphonesEnabled { headphones = []; previousDevices = nil; activity = nil } } }
+    var hasTools: Bool { timersEnabled || downloadsEnabled || shelfEnabled || outputsEnabled || batteryEnabled || headphonesEnabled }
+    private func changed(_ key: String, _ value: Bool) { UserDefaults.standard.set(value, forKey: key) }
     private var timer: Timer?
     private var ticks = 0
     private var noticeUntil = Date.distantPast
@@ -32,13 +40,13 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
     private var session: URLSession?
     func start() {
         guard timer == nil else { return }
-        refreshRoutes()
+        if outputsEnabled { refreshRoutes() }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick() } }
     }
     func setSleeping(_ sleeping: Bool) { timer?.fireDate = sleeping ? .distantFuture : Date() }
     func stop() { timer?.invalidate(); timer = nil; task?.cancel(); session?.invalidateAndCancel() }
     func announce(_ text: String, symbol: String) { activity = text; activitySymbol = symbol; noticeUntil = Date().addingTimeInterval(5) }
-    func startTimer(minutes: Int) { deadline = Date().addingTimeInterval(Double(minutes * 60)); tick() }
+    func startTimer(minutes: Int) { guard timersEnabled else { return }; deadline = Date().addingTimeInterval(Double(minutes * 60)); tick() }
     func cancelTimer() { deadline = nil; remaining = 0; activity = nil }
     private func tick() {
         ticks += 1
@@ -47,8 +55,8 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
             if remaining == 0 { self.deadline = nil; announce("Timer finished", symbol: "timer"); NSSound(named: "Glass")?.play() }
         }
         if ticks % 5 == 0 {
-            if UserDefaults.standard.bool(forKey: "batteryActivities") { readBattery() }
-            if UserDefaults.standard.bool(forKey: "headphoneActivities") { readHeadphones() }
+            if batteryEnabled { readBattery() }
+            if headphonesEnabled { readHeadphones() }
         }
         if Date() > noticeUntil {
             if deadline != nil { activity = "Timer · \(remaining / 60):\(String(format: "%02d", remaining % 60))"; activitySymbol = "timer" }
@@ -112,6 +120,7 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
         _ = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, &size, &output)
     }
     func selectOutput(_ id: AudioDeviceID) {
+        guard outputsEnabled else { return }
         var value = id
         var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: 0)
         if AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &value) != noErr { message = "This output could not be selected." }
@@ -119,12 +128,13 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
         refreshRoutes()
     }
     func accept(_ providers: [NSItemProvider]) -> Bool {
+        guard shelfEnabled else { return false }
         for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] item, _ in
                 let url = (item as? URL) ?? (item as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
                 guard let url, url.isFileURL else { return }
                 Task { @MainActor in
-                    guard let self, !self.files.contains(url), self.files.count < 20 else { return }
+                    guard let self, self.shelfEnabled, !self.files.contains(url), self.files.count < 20 else { return }
                     self.files.append(url); self.announce("File added to shelf", symbol: "tray.and.arrow.down")
                 }
             }
@@ -132,6 +142,7 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
         return true
     }
     func download(_ text: String) {
+        guard downloadsEnabled else { return }
         guard !downloading, let url = ActivityDownloadURL.parse(text) else { message = "Enter an HTTPS download link."; return }
         let save = NSSavePanel(); save.nameFieldStringValue = url.lastPathComponent.isEmpty ? "Download" : url.lastPathComponent
         guard save.runModal() == .OK, let path = save.url else { return }
@@ -139,7 +150,7 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
         session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
         task = session?.downloadTask(with: url); task?.resume()
     }
-    func cancelDownload() { task?.cancel(); downloading = false; downloadProgress = nil; activity = nil }
+    func cancelDownload() { task?.cancel(); task = nil; session?.invalidateAndCancel(); session = nil; destination = nil; downloading = false; downloadProgress = nil; activity = nil }
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         Task { @MainActor in guard self.task === downloadTask else { return }; self.downloadProgress = totalBytesExpectedToWrite > 0 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : nil }
     }
@@ -151,7 +162,7 @@ struct OutputRoute: Identifiable { let id: AudioDeviceID; let name: String }
                 guard let response = downloadTask.response as? HTTPURLResponse, (200...299).contains(response.statusCode) else { throw URLError(.badServerResponse) }
                 if FileManager.default.fileExists(atPath: destination.path) { _ = try FileManager.default.replaceItemAt(destination, withItemAt: location) }
                 else { try FileManager.default.moveItem(at: location, to: destination) }
-                files.append(destination)
+                if shelfEnabled, files.count < 20 { files.append(destination) }
                 announce("Download complete · \(destination.lastPathComponent)", symbol: "checkmark.circle")
             } catch { message = error.localizedDescription }
             downloading = false; downloadProgress = nil
@@ -171,24 +182,48 @@ struct IslandToolsView: View {
     @ObservedObject private var modules = IslandModules.shared
     @State private var downloadURL = ""
     @State private var selected = 0
+    private var availableTabs: [Int] {
+        var tabs: [Int] = []
+        if modules.timersEnabled || modules.downloadsEnabled || modules.batteryEnabled || modules.headphonesEnabled { tabs.append(0) }
+        if modules.shelfEnabled { tabs.append(1) }
+        if modules.outputsEnabled { tabs.append(2) }
+        return tabs
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("Tools", selection: $selected) { Text("Activities").tag(0); Text("Files").tag(1); Text("Sound").tag(2) }.pickerStyle(.segmented)
+            HStack(spacing: 6) {
+                ForEach(availableTabs, id: \.self) { tab in
+                    Button { selected = tab } label: {
+                        Label(["Activities", "Files", "Sound"][tab], systemImage: ["timer", "tray", "speaker.wave.2"][tab])
+                            .font(.system(size: 11, weight: .semibold)).frame(maxWidth: .infinity).padding(.vertical, 9)
+                            .background(.white.opacity(selected == tab ? 0.16 : 0.04), in: Capsule())
+                    }.buttonStyle(.plain)
+                }
+            }.padding(.bottom, 8)
             if selected == 0 {
-                HStack {
+                if modules.timersEnabled { HStack {
                     Label(modules.deadline == nil ? "Timer" : "\(modules.remaining / 60):\(String(format: "%02d", modules.remaining % 60))", systemImage: "timer").monospacedDigit()
                     Spacer()
                     Menu("Set") { ForEach([1, 5, 10, 25, 45, 60], id: \.self) { n in Button("\(n) minutes") { modules.startTimer(minutes: n) } }; Button("Cancel") { modules.cancelTimer() } }
                 }
+                }
                 if !modules.batteryText.isEmpty { Label(modules.batteryText, systemImage: "battery.100") }
                 ForEach(modules.headphones, id: \.self) { Text($0).font(.caption) }
-                Divider()
-                TextField("HTTPS download link", text: $downloadURL).textFieldStyle(.roundedBorder)
+                if modules.downloadsEnabled {
+                Divider().overlay(.white.opacity(0.1))
+                TextField("HTTPS download link", text: $downloadURL).textFieldStyle(.plain).padding(10).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                 HStack { Button("Download…") { modules.download(downloadURL) }.disabled(modules.downloading); if modules.downloading { Button("Cancel") { modules.cancelDownload() } } }
                 if modules.downloading { ProgressView(value: modules.downloadProgress); Text(modules.downloadName).font(.caption).lineLimit(1) }
                 Text("Tracks downloads started here. Files are saved where you choose.").font(.caption2).foregroundStyle(.secondary)
+                }
             } else if selected == 1 {
                 Text("Drop files onto the island, then drag them into another app.").font(.caption).foregroundStyle(.secondary)
+                if modules.files.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray.and.arrow.down").font(.system(size: 25, weight: .light))
+                        Text("Your shelf is empty").font(.system(size: 13, weight: .semibold))
+                    }.foregroundStyle(.white.opacity(0.45)).frame(maxWidth: .infinity).padding(.vertical, 22)
+                }
                 ScrollView {
                     LazyVStack(alignment: .leading) {
                         ForEach(modules.files, id: \.self) { url in
@@ -196,7 +231,7 @@ struct IslandToolsView: View {
                                 Label(url.lastPathComponent, systemImage: "doc").lineLimit(1).onDrag { NSItemProvider(object: url as NSURL) }
                                 Spacer()
                                 Button { modules.files.removeAll { $0 == url } } label: { Image(systemName: "xmark.circle") }.help("Remove from shelf; keeps original file")
-                            }.padding(.vertical, 5)
+                            }.padding(10).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                         }
                     }
                 }
@@ -208,8 +243,9 @@ struct IslandToolsView: View {
             }
             if let message = modules.message { Text(message).font(.caption).foregroundStyle(.orange).lineLimit(3) }
             Spacer(minLength: 0)
-        }.padding(.horizontal, 32).padding(.bottom, 24).foregroundStyle(.white)
-            .onAppear { modules.refreshRoutes() }
+        }.font(.system(size: 12, weight: .medium)).buttonStyle(IslandToolButtonStyle()).tint(.white).controlSize(.small).padding(.horizontal, 32).padding(.bottom, 24).foregroundStyle(.white)
+            .onAppear { selected = availableTabs.first ?? 0; if modules.outputsEnabled { modules.refreshRoutes() } }
+            .onChange(of: availableTabs) { tabs in if !tabs.contains(selected) { selected = tabs.first ?? 0 } }
     }
 }
 
@@ -223,13 +259,18 @@ extension NSScreen {
 struct ModulePreferences: View {
     @ObservedObject var state: IslandState
     @ObservedObject private var modules = IslandModules.shared
-    @AppStorage("batteryActivities") private var battery = false
-    @AppStorage("headphoneActivities") private var headphones = false
     @AppStorage("animationIntensity") private var intensity = 1.0
     var body: some View {
+        Section("Optional tools") {
+            Toggle("Timers", isOn: $modules.timersEnabled)
+            Toggle("Downloads", isOn: $modules.downloadsEnabled)
+            Toggle("Drag-and-drop file shelf", isOn: $modules.shelfEnabled)
+            Toggle("Audio output switcher", isOn: $modules.outputsEnabled)
+            Text("Off by default. Enable only the tools you want in the expanded player. Turning a tool off stops its active task; original files are kept.").font(.caption).foregroundStyle(.secondary)
+        }
         Section("Live Activities") {
-            Toggle("Battery charging notifications", isOn: $battery)
-            Toggle("AirPods and Beats connection notifications", isOn: $headphones)
+            Toggle("Battery charging notifications", isOn: $modules.batteryEnabled)
+            Toggle("AirPods and Beats connection notifications", isOn: $modules.headphonesEnabled)
             Text("Headphone battery appears when macOS provides it. Open Tools in the expanded player for timers, downloads, files and audio outputs.").font(.caption).foregroundStyle(.secondary)
             Toggle("Presentation mode — hide Undertone", isOn: $modules.presentation)
             Text("Restore from settings or ⌘⌥P. Presentation mode also hides the lock-screen player.").font(.caption).foregroundStyle(.secondary)
@@ -246,5 +287,18 @@ struct ModulePreferences: View {
             Slider(value: $intensity, in: 0...1.5).accessibilityLabel("Animation intensity")
             HStack { Text("Still"); Spacer(); Text("Animation intensity"); Spacer(); Text("Playful") }.font(.caption)
         }
+    }
+}
+
+struct IslandToolButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(.white.opacity(configuration.isPressed ? 0.18 : 0.09), in: Capsule())
+            .opacity(enabled ? 1 : 0.4)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
     }
 }

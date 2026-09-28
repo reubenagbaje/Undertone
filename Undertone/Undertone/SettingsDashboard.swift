@@ -17,11 +17,29 @@ struct SettingsDashboard: View {
     @State var selectedTab = 0
     var body: some View {
         VStack(spacing: 0) {
-            TabView(selection: $selectedTab) {
-                general.tag(0).tabItem { Label("General", systemImage: "gearshape") }
-                modules.tag(1).tabItem { Label("Modules", systemImage: "square.grid.2x2") }
-                appearance.tag(2).tabItem { Label("Appearance", systemImage: "paintpalette") }
-            }
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform").font(.system(size: 24, weight: .medium))
+                        .frame(width: 48, height: 48).background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Undertone").font(.system(size: 22, weight: .bold))
+                        Text("Make it yours.").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                HStack(spacing: 6) {
+                    ForEach(0..<3) { tab in
+                        Button { selectedTab = tab } label: {
+                            Label(["General", "Modules", "Appearance"][tab], systemImage: ["gearshape", "square.grid.2x2", "paintpalette"][tab])
+                                .font(.system(size: 12, weight: .semibold)).frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(.white.opacity(selectedTab == tab ? 0.14 : 0.04), in: Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }.padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 8)
+            Group {
+                switch selectedTab { case 1: modules; case 2: appearance; default: general }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             HStack {
                 Text("Made by Reuben Agbaje").font(.caption).foregroundStyle(.secondary)
@@ -29,7 +47,9 @@ struct SettingsDashboard: View {
                 Button("Quit Undertone") { NSApplication.shared.terminate(nil) }.controlSize(.small)
             }.padding(.horizontal, 24).padding(.vertical, 14)
         }
-        .frame(width: 620, height: 650)
+        .frame(width: 620, height: 720)
+        .background(Color(white: 0.06)).preferredColorScheme(.dark).tint(.white)
+        .buttonStyle(IslandToolButtonStyle())
     }
     private var general: some View {
         Form {
@@ -46,7 +66,7 @@ struct SettingsDashboard: View {
                 Toggle("Keep player expanded", isOn: $state.pinned)
                 Toggle("Reverse swipe direction", isOn: $state.reverseSwipes)
             }
-            Section("Volume indicator") { VolumeHUDSettings() }
+            Section("System indicators") { VolumeHUDSettings() }
             Section("Sleep timer") { SleepTimerSettings(timer: spotify.sleepTimer) { spotify.pause() } }
             Section("Updates") { UpdateSettings() }
             Section("Music player") {
@@ -66,7 +86,7 @@ struct SettingsDashboard: View {
             Section("Audio") {
                 Text(audio.message).font(.callout)
                 HStack {
-                    Button(audio.running ? "Stop Spotify audio" : "Enable Spotify audio") {
+                    Button(audio.running ? "Stop player audio" : "Enable player audio") {
                         Task { if audio.running { await audio.stop() } else { await audio.start() } }
                     }
                     Button("Restart audio") { Task { await audio.restart() } }
@@ -78,9 +98,10 @@ struct SettingsDashboard: View {
     }
     private var modules: some View {
         Form {
+            ModulePreferences(state: state)
             Section("Now Playing") {
                 Toggle("Lock Screen Media Player", isOn: $enableLockScreenPlayer)
-                Text("Shows a media overlay after locking an already signed-in Mac. Tap artwork to expand or collapse it. Move the pointer down to the password area to collapse full-screen artwork. The player never takes keyboard focus. Visibility remains macOS-version dependent.")
+                Text("Music controls while your Mac is locked. Tap artwork to expand it; move toward the password field to collapse. Availability depends on macOS.")
                     .font(.caption).foregroundStyle(.secondary)
                 Group {
                     Toggle("Liquid Glass player", isOn: $lockPlayerLiquidGlass)
@@ -89,11 +110,10 @@ struct SettingsDashboard: View {
                     Toggle("Smooth Unlocking Shrink Animation", isOn: $unlockAnimation)
                 }.disabled(!enableLockScreenPlayer)
                 Button("Preview Now Playing") { lockPlayer.preview() }
-                Text("Tap the thumbnail to fill the preview with artwork; tap the artwork or collapse button to return. This preview does not lock your Mac.")
+                Text("Preview without locking your Mac. Tap artwork to expand or collapse.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text(lockPlayer.status).font(.caption).foregroundStyle(.secondary)
             }
-            ModulePreferences(state: state)
             Section("Lyrics") {
                 LyricsImportSettings(store: lockPlayer.lyrics, spotify: spotify)
             }

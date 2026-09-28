@@ -11,9 +11,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.26</string>
+	<string>1.26.1</string>
 	<key>CFBundleVersion</key>
-	<string>30</string>
+	<string>31</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSUIElement</key>
@@ -36,6 +36,8 @@
 	<string>https://raw.githubusercontent.com/reubenagbaje/Undertone/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>cXkw6mDzaFnhHedw3xrq4zpVJjDu+Tp6y84PlGv5KxY=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 	<key>SURequireSignedFeed</key>
 	<true/>
 </dict>

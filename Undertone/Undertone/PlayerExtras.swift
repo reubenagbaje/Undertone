@@ -228,9 +228,25 @@ struct SleepTimerSettings: View {
     }
 }
 
-@MainActor final class AppUpdates: ObservableObject {
+@MainActor final class AppUpdates: NSObject, ObservableObject, SPUUpdaterDelegate {
     static let shared = AppUpdates()
-    let controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    @Published var status = "Ready to check for updates."
+    private(set) var started = false
+    lazy var controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
+    override init() {
+        super.init()
+        do { try controller.updater.start(); started = true }
+        catch { status = "Unable to start updates: \(error.localizedDescription)" }
+    }
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        status = error.localizedDescription
+    }
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        status = "Update available: \(item.displayVersionString)"
+    }
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        status = error?.localizedDescription ?? "Update check completed."
+    }
     var automatic: Bool {
         get { controller.updater.automaticallyChecksForUpdates }
         set { controller.updater.automaticallyChecksForUpdates = newValue; objectWillChange.send() }
@@ -239,7 +255,12 @@ struct SleepTimerSettings: View {
         get { controller.updater.automaticallyDownloadsUpdates }
         set { controller.updater.automaticallyDownloadsUpdates = newValue; objectWillChange.send() }
     }
-    func check() { controller.checkForUpdates(nil) }
+    func check() {
+        guard started else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        status = "Checking for updates…"
+        controller.checkForUpdates(nil)
+    }
 }
 
 struct UpdateSettings: View {
@@ -248,6 +269,8 @@ struct UpdateSettings: View {
         Toggle("Automatically check for updates", isOn: Binding(get: { updates.automatic }, set: { updates.automatic = $0 }))
         Toggle("Download and install updates automatically", isOn: Binding(get: { updates.installAutomatically }, set: { updates.installAutomatically = $0 })).disabled(!updates.automatic)
         Button("Check for Updates…") { updates.check() }
+        Text(updates.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")").font(.caption).foregroundStyle(.secondary)
         Text("Updates are verified before installation. Updates are delivered from the official Undertone GitHub releases.").font(.caption).foregroundStyle(.secondary)
     }
 }
